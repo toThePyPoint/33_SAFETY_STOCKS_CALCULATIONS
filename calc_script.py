@@ -147,13 +147,13 @@ def create_stats_df(mb51_path, zsbe_path, prd_plant, get_all_dates, start_date, 
     )
 
     # Get price AND price unit from zsbe_df
-    price_data = zsbe_df[['material', 'plant', 'unit_price_eur', 'price_unit']].drop_duplicates()
+    price_data = zsbe_df[['material', 'plant', 'unit_price_eur', 'price_unit', 'material_description']].drop_duplicates()
 
     # Merge with statistics
     stats_df = pd.merge(stats_df, price_data, on=['material', 'plant'], how='left')
 
     # Calculate value
-    stats_df['safety_stock_value'] = (
+    stats_df['new_safety_stock_value'] = (
                                              stats_df['new_safety_stock'] * stats_df['unit_price_eur']
                                      ) / stats_df['price_unit']
 
@@ -162,7 +162,7 @@ def create_stats_df(mb51_path, zsbe_path, prd_plant, get_all_dates, start_date, 
                             ) / stats_df['price_unit']
 
     # Round to 2 decimal places (monetary value)
-    stats_df['safety_stock_value'] = stats_df['safety_stock_value'].round(2)
+    stats_df['new_safety_stock_value'] = stats_df['safety_stock_value'].round(2)
     stats_df['ROP_value'] = stats_df['ROP_value'].round(2)
 
     # Attach old safety stock for comparison
@@ -171,6 +171,13 @@ def create_stats_df(mb51_path, zsbe_path, prd_plant, get_all_dates, start_date, 
 
     # Check the difference
     stats_df['ss_diff'] = stats_df['new_safety_stock'] - stats_df['safety_stock_in_SAP']
+
+    stats_df['new_ss_range'] = stats_df['new_safety_stock'] / stats_df['daily_avg_consumption']
+    stats_df['new_ss_range'] = stats_df['new_ss_range'].round(2)
+
+    stats_df = stats_df[['plant', 'material', 'material_description', 'daily_std_dev', 'lead_time',
+                         'daily_avg_consumption', 'new_safety_stock', 'new_ss_range', 'new_safety_stock_value',
+                         'reorder_point', 'ROP_value', 'safety_stock_in_SAP', 'ss_diff']]
 
     return stats_df
 
