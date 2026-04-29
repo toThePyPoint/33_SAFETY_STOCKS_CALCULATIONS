@@ -92,8 +92,6 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_d
     ).fillna(0)
 
     # Group by material and plant to calculate statistics
-    # stats_df = final_df.groupby(['material', 'plant'])['quantity'].agg(['mean', 'std']).reset_index()
-
     stats_df = final_df.groupby(['material', 'plant'])['quantity'].agg(
         daily_avg_consumption='mean',
         daily_std_dev='std',
@@ -113,11 +111,6 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_d
         stats_df['daily_mad'],  # outlier case
         stats_df['daily_std_dev']  # normal case
     )
-    # # Rename columns to more descriptive names (Snake Case)
-    # stats_df.rename(columns={
-    #     'mean': 'daily_avg_consumption',
-    #     'std': 'daily_std_dev'
-    # }, inplace=True)
 
     # Handle missing values (if std could not be calculated, e.g. no variability)
     stats_df['daily_std_dev'] = stats_df['daily_std_dev'].fillna(0)
@@ -146,9 +139,6 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_d
 
     # Now you can merge this with your statistics table
     stats_df = pd.merge(stats_df, lead_times[['material', 'plant', 'lead_time']], on=['material', 'plant'], how='left')
-    # stats_df['new_safety_stock'] = (
-    #         k_parameter * stats_df['daily_std_dev'] * np.sqrt(stats_df['lead_time'])
-    # )
     stats_df['new_safety_stock'] = (
             k_parameter * stats_df['volatility_measure'] * np.sqrt(stats_df['lead_time'])
     )
@@ -169,10 +159,14 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_d
     # Round up
     stats_df['reorder_point'] = np.ceil(stats_df['reorder_point']).astype(int)
 
-    # Set new_safety_stock and ROP to zero for materials present in no_ss_items_df
-    print(no_ss_items_df)
-    stats_df.loc[stats_df['material'].isin(no_ss_items_df['material']), 'new_safety_stock'] = 0
-    stats_df.loc[stats_df['material'].isin(no_ss_items_df['material']), 'reorder_point'] = 0
+    # Create a boolean mask for materials present in the exclusion list
+    mask = stats_df['material'].isin(no_ss_items_df['material'])
+
+    # Initialize the 'no_ss_item' column with False as the default value
+    stats_df['is_no_ss_item'] = False
+
+    # For matching rows, update the stock parameters to zero and set the flag to True
+    stats_df.loc[mask, ['new_safety_stock', 'reorder_point', 'is_no_ss_item']] = [0, 0, True]
 
     # Create a new column with converted price
     # .map() matches the currency to the exchange rate, then we multiply it by the unit price
@@ -201,6 +195,8 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_d
 
     # Check the difference
     stats_df['ss_diff'] = stats_df['new_safety_stock'] - stats_df['safety_stock_in_SAP']
+    stats_df['rop_ss_diff'] = stats_df['reorder_point'] - stats_df['safety_stock_in_SAP']
+    
 
     stats_df['new_ss_range'] = stats_df['new_safety_stock'] / stats_df['daily_avg_consumption']
     stats_df['new_ss_range'] = stats_df['new_ss_range'].round(2)
@@ -208,71 +204,93 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_d
     return stats_df
 
 def create_plant_summary(stats_df):
-    # 1. Create a new DataFrame with summary per plant
+    # 1. Calculate old_ss_value first to include it in the main aggregation
+    stats_df['old_ss_value'] = (stats_df['safety_stock_in_SAP'] * stats_df['unit_price_eur']) / stats_df['price_unit']
+
+    # 2. Aggregate everything in ONE step to avoid merge conflicts/duplicates
     plant_summary = stats_df.groupby('plant').agg({
         'new_safety_stock': 'sum',
         'safety_stock_in_SAP': 'sum',
         'ss_diff': 'sum',
-        'new_safety_stock_value': 'sum'
+        'rop_ss_diff': 'sum',
+        'new_safety_stock_value': 'sum',
+        'ROP_value': 'sum',
+        'old_ss_value': 'sum',  # Aggregated here directly
+        'reorder_point': 'sum'
     }).reset_index()
 
-    # 2. Calculate the value of the previous safety stock (earlier)
-    # Assuming the value is calculated using the same unit price:
-    stats_df['old_ss_value'] = (stats_df['safety_stock_in_SAP'] * stats_df['unit_price_eur']) / stats_df['price_unit']
+    # 3. Add columns with value difference
+    plant_summary['ss_value_diff'] = plant_summary['new_safety_stock_value'] - plant_summary['old_ss_value']
+    plant_summary['rop_ss_value_diff'] = plant_summary['ROP_value'] - plant_summary['old_ss_value']
 
-    # Attach the sum of the old value to the summary
-    old_value_sum = stats_df.groupby('plant')['old_ss_value'].sum().reset_index()
-    plant_summary = pd.merge(plant_summary, old_value_sum, on='plant')
-
-    # 3. Add a column with value difference (how much capital is released or tied up)
-    plant_summary['value_diff'] = plant_summary['new_safety_stock_value'] - plant_summary['old_ss_value']
-
-    # 4. Rename columns to be more readable for reporting
+    # 4. Rename columns
     plant_summary.rename(columns={
         'new_safety_stock': 'Total New SS (Qty)',
+        'reorder_point': 'Total Reorder Point (Qty)',
         'safety_stock_in_SAP': 'Total Old SS (Qty)',
-        'ss_diff': 'Total Qty Diff',
+        'ss_diff': 'Total SS - SS Qty Diff',
+        'rop_ss_diff': 'Total ROP - SS Qty Diff',
         'new_safety_stock_value': 'Total New SS Value [EUR]',
+        'ROP_value': 'Total ROP Value [EUR]',
         'old_ss_value': 'Total Old SS Value [EUR]',
-        'value_diff': 'Value Difference [EUR]'
+        'ss_value_diff': 'Value Difference SS - SS [EUR]',
+        'rop_ss_value_diff': 'Value Difference ROP - SS [EUR]'
     }, inplace=True)
 
-    # Round monetary values
-    cols_to_round = ['Total New SS Value [EUR]', 'Total Old SS Value [EUR]', 'Value Difference [EUR]']
-    plant_summary[cols_to_round] = plant_summary[cols_to_round].round(2)
+    # 5. Round monetary values - using a safer list to ensure no duplicates are missed
+    cols_to_round = [
+        'Total New SS Value [EUR]',
+        'Total Old SS Value [EUR]',
+        'Value Difference SS - SS [EUR]',
+        'Value Difference ROP - SS [EUR]',
+        'Total ROP Value [EUR]'  # Added this as it is also a monetary value
+    ]
+
+    # Ensure columns exist before rounding to avoid errors
+    existing_cols = [c for c in cols_to_round if c in plant_summary.columns]
+    plant_summary[existing_cols] = plant_summary[existing_cols].round(0).astype(int)
 
     return plant_summary
 
-def create_a_summary_plot(plant_summary, save_path=None):
+def create_a_summary_plot_ss_to_ss_comparison(plant_summary, save_path=None):
     # Prepare data
     plot_data = plant_summary[plant_summary['plant'] != 'TOTAL'].copy()
     labels = plot_data['plant'].astype(str)
     x = np.arange(len(labels))
     width = 0.25
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 4))
 
-    def autolabel(rects, ax, is_value=False):
+    def autolabel(rects, ax, is_value=False, position='center'):
         for rect in rects:
             height = rect.get_height()
-            # Format: thousands separator, 0 decimals for Qty, 2 for Value
-            label_text = f'{height:,.0f}' if not is_value else f'{height:,.2f}'
+            label_text = f'{height:,.0f}'
 
-            # Determine position (above for positive, below for negative)
             va_pos = 'bottom' if height >= 0 else 'top'
-            offset = 3 if height >= 0 else -3
+            offset_y = 5 if height >= 0 else -5
+
+            # --- PRECYZYJNE ROZPYCHANIE (ha='center' + większy offset) ---
+            if position == 'left':
+                ha_align = 'center'
+                offset_x = -4  # Przesunięcie o 8 punktów w lewo
+            elif position == 'right':
+                ha_align = 'center'
+                offset_x = 4  # Przesunięcie o 8 punktów w prawo
+            else:
+                ha_align = 'center'
+                offset_x = 0
 
             ax.annotate(label_text,
                         xy=(rect.get_x() + rect.get_width() / 2, height),
-                        xytext=(0, offset),
+                        xytext=(offset_x, offset_y),
                         textcoords="offset points",
-                        ha='center', va=va_pos,
-                        fontsize=8, fontweight='bold', rotation=0)
+                        ha=ha_align, va=va_pos,
+                        fontsize=7, fontweight='bold')
 
     # --- PLOT 1: QUANTITIES ---
     rects1 = ax1.bar(x - width, plot_data['Total Old SS (Qty)'], width, label='Old SS (Qty)', color='lightgrey')
     rects2 = ax1.bar(x, plot_data['Total New SS (Qty)'], width, label='New SS (Qty)', color='skyblue')
-    rects3 = ax1.bar(x + width, plot_data['Total Qty Diff'], width, label='Qty Diff', color='orange')
+    rects3 = ax1.bar(x + width, plot_data['Total SS - SS Qty Diff'], width, label='Qty SS - SS Diff', color='orange')
 
     ax1.set_ylabel('Quantity (pcs)')
     ax1.set_title('Safety Stock Comparison - Quantities')
@@ -282,18 +300,18 @@ def create_a_summary_plot(plant_summary, save_path=None):
     ax1.grid(axis='y', linestyle='--', alpha=0.3)
 
     # Expand Y-axis to fit labels (min/max with padding)
-    all_qty = plot_data[['Total Old SS (Qty)', 'Total New SS (Qty)', 'Total Qty Diff']]
+    all_qty = plot_data[['Total Old SS (Qty)', 'Total New SS (Qty)', 'Total SS - SS Qty Diff']]
     ax1.set_ylim(all_qty.min().min() * 1.2, all_qty.max().max() * 1.2)
 
-    autolabel(rects1, ax1)
-    autolabel(rects2, ax1)
-    autolabel(rects3, ax1)
+    autolabel(rects1, ax1, position='left')
+    autolabel(rects2, ax1, position='right')
+    autolabel(rects3, ax1, position='center')
 
     # --- PLOT 2: VALUES (Value in EUR) ---
     rects4 = ax2.bar(x - width, plot_data['Total Old SS Value [EUR]'], width, label='Old SS Value (EUR)',
                      color='#762a83')
     rects5 = ax2.bar(x, plot_data['Total New SS Value [EUR]'], width, label='New SS Value (EUR)', color='#1b7837')
-    rects6 = ax2.bar(x + width, plot_data['Value Difference [EUR]'], width, label='Value Difference (EUR)',
+    rects6 = ax2.bar(x + width, plot_data['Value Difference SS - SS [EUR]'], width, label='Value Difference SS - SS (EUR)',
                      color='#d73027')
 
     ax2.set_ylabel('Value (EUR)')
@@ -304,12 +322,12 @@ def create_a_summary_plot(plant_summary, save_path=None):
     ax2.grid(axis='y', linestyle='--', alpha=0.3)
 
     # Expand Y-axis for values
-    all_val = plot_data[['Total Old SS Value [EUR]', 'Total New SS Value [EUR]', 'Value Difference [EUR]']]
+    all_val = plot_data[['Total Old SS Value [EUR]', 'Total New SS Value [EUR]', 'Value Difference SS - SS [EUR]']]
     ax2.set_ylim(all_val.min().min() * 1.2, all_val.max().max() * 1.2)
 
-    autolabel(rects4, ax2, is_value=True)
-    autolabel(rects5, ax2, is_value=True)
-    autolabel(rects6, ax2, is_value=True)
+    autolabel(rects4, ax2, is_value=True, position='left')
+    autolabel(rects5, ax2, is_value=True, position='right')
+    autolabel(rects6, ax2, is_value=True, position='center')
 
     plt.tight_layout()
 
@@ -320,3 +338,203 @@ def create_a_summary_plot(plant_summary, save_path=None):
     plt.close(fig)
 
     return fig
+
+def create_a_summary_plot_rop_to_ss_comparison(plant_summary, save_path=None):
+    # Prepare data
+    plot_data = plant_summary[plant_summary['plant'] != 'TOTAL'].copy()
+    labels = plot_data['plant'].astype(str)
+    x = np.arange(len(labels))
+    width = 0.25
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 4))
+
+    def autolabel(rects, ax, is_value=False, position='center'):
+        for rect in rects:
+            height = rect.get_height()
+            label_text = f'{height:,.0f}'
+
+            va_pos = 'bottom' if height >= 0 else 'top'
+            offset_y = 5 if height >= 0 else -5
+
+            # --- PRECYZYJNE ROZPYCHANIE (ha='center' + większy offset) ---
+            if position == 'left':
+                ha_align = 'center'
+                offset_x = -4  # Przesunięcie o 8 punktów w lewo
+            elif position == 'right':
+                ha_align = 'center'
+                offset_x = 4  # Przesunięcie o 8 punktów w prawo
+            else:
+                ha_align = 'center'
+                offset_x = 0
+
+            ax.annotate(label_text,
+                        xy=(rect.get_x() + rect.get_width() / 2, height),
+                        xytext=(offset_x, offset_y),
+                        textcoords="offset points",
+                        ha=ha_align, va=va_pos,
+                        fontsize=7, fontweight='bold')
+
+    # --- PLOT 1: QUANTITIES ---
+    rects7 = ax1.bar(x - width, plot_data['Total Old SS (Qty)'], width, label='Old SS (Qty)', color='lightgrey')
+    rects8 = ax1.bar(x, plot_data['Total Reorder Point (Qty)'], width, label='New ROP (Qty)', color='#a6cee3')
+    rects9 = ax1.bar(x + width, plot_data['Total ROP - SS Qty Diff'], width, label='Qty ROP - SS Diff', color='#fb9a99')
+
+    ax1.set_ylabel('Quantity (pcs)')
+    ax1.set_title('ROP vs Current SS Comparison - Quantities')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(labels)
+    ax1.legend(loc='upper left')
+    ax1.grid(axis='y', linestyle='--', alpha=0.3)
+
+    # --- FIX 2: Better Y-margin ---
+    # We use a larger multiplier and sym_log-like padding for the frame issue
+    all_qty = plot_data[['Total Old SS (Qty)', 'Total Reorder Point (Qty)', 'Total ROP - SS Qty Diff']]
+    y_min, y_max = all_qty.min().min(), all_qty.max().max()
+    ax1.set_ylim(y_min * 1.3 if y_min < 0 else 0, y_max * 1.3)
+
+    autolabel(rects7, ax1, position='left')
+    autolabel(rects8, ax1, position='right')
+    autolabel(rects9, ax1, position='center')
+
+    # --- PLOT 2: VALUES ---
+    rects10 = ax2.bar(x - width, plot_data['Total Old SS Value [EUR]'], width, label='Old SS Value (EUR)',
+                      color='#762a83')
+    rects11 = ax2.bar(x, plot_data['Total ROP Value [EUR]'], width, label='Total ROP Value (EUR)', color='#33a02c')
+    rects12 = ax2.bar(x + width, plot_data['Value Difference ROP - SS [EUR]'], width, label='Value Diff ROP-SS (EUR)',
+                      color='#e31a1c')
+
+    ax2.set_ylabel('Value (EUR)')
+    ax2.set_title('ROP vs Current SS Value Comparison')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(labels)
+    ax2.legend(loc='upper left')
+    ax2.grid(axis='y', linestyle='--', alpha=0.3)
+
+    all_val = plot_data[['Total Old SS Value [EUR]', 'Total ROP Value [EUR]', 'Value Difference ROP - SS [EUR]']]
+    y_min_v, y_max_v = all_val.min().min(), all_val.max().max()
+    ax2.set_ylim(y_min_v * 1.3 if y_min_v < 0 else 0, y_max_v * 1.3)
+
+    autolabel(rects10, ax2, is_value=True, position='left')
+    autolabel(rects11, ax2, is_value=True, position='right')
+    autolabel(rects12, ax2, is_value=True, position='center')
+
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=300)
+    plt.close(fig)
+
+    return fig
+
+# def create_a_summary_plot(plant_summary, save_path=None):
+#     # Prepare data
+#     plot_data = plant_summary[plant_summary['plant'] != 'TOTAL'].copy()
+#     labels = plot_data['plant'].astype(str)
+#     x = np.arange(len(labels))
+#     width = 0.25
+#
+#     # Change to 2 rows and 2 columns
+#     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(22, 14))
+#
+#     def autolabel(rects, ax, is_value=False):
+#         for rect in rects:
+#             height = rect.get_height()
+#             # Format: thousands separator, 0 decimals for Qty, 2 for Value
+#             label_text = f'{height:,.0f}' if not is_value else f'{height:,.2f}'
+#
+#             # Determine position (above for positive, below for negative)
+#             va_pos = 'bottom' if height >= 0 else 'top'
+#             offset = 3 if height >= 0 else -3
+#
+#             ax.annotate(label_text,
+#                         xy=(rect.get_x() + rect.get_width() / 2, height),
+#                         xytext=(0, offset),
+#                         textcoords="offset points",
+#                         ha='center', va=va_pos,
+#                         fontsize=8, fontweight='bold', rotation=0)
+#
+#     # --- PLOT 1: QUANTITIES (SS vs SS) ---
+#     rects1 = ax1.bar(x - width, plot_data['Total Old SS (Qty)'], width, label='Old SS (Qty)', color='lightgrey')
+#     rects2 = ax1.bar(x, plot_data['Total New SS (Qty)'], width, label='New SS (Qty)', color='skyblue')
+#     rects3 = ax1.bar(x + width, plot_data['Total SS - SS Qty Diff'], width, label='Qty SS-SS Diff', color='orange')
+#
+#     ax1.set_ylabel('Quantity (pcs)')
+#     ax1.set_title('Safety Stock Comparison - Quantities')
+#     ax1.set_xticks(x)
+#     ax1.set_xticklabels(labels)
+#     ax1.legend()
+#     ax1.grid(axis='y', linestyle='--', alpha=0.3)
+#     all_qty1 = plot_data[['Total Old SS (Qty)', 'Total New SS (Qty)', 'Total SS - SS Qty Diff']]
+#     ax1.set_ylim(all_qty1.min().min() * 1.2, all_qty1.max().max() * 1.2)
+#     autolabel(rects1, ax1)
+#     autolabel(rects2, ax1)
+#     autolabel(rects3, ax1)
+#
+#     # --- PLOT 2: VALUES (SS vs SS) ---
+#     rects4 = ax2.bar(x - width, plot_data['Total Old SS Value [EUR]'], width, label='Old SS Value (EUR)', color='#762a83')
+#     rects5 = ax2.bar(x, plot_data['Total New SS Value [EUR]'], width, label='New SS Value (EUR)', color='#1b7837')
+#     rects6 = ax2.bar(x + width, plot_data['Value Difference SS - SS [EUR]'], width, label='Value Diff SS-SS (EUR)', color='#d73027')
+#
+#     ax2.set_ylabel('Value (EUR)')
+#     ax2.set_title('Safety Stock Value Comparison')
+#     ax2.set_xticks(x)
+#     ax2.set_xticklabels(labels)
+#     ax2.legend()
+#     ax2.grid(axis='y', linestyle='--', alpha=0.3)
+#     all_val2 = plot_data[['Total Old SS Value [EUR]', 'Total New SS Value [EUR]', 'Value Difference SS - SS [EUR]']]
+#     ax2.set_ylim(all_val2.min().min() * 1.2, all_val2.max().max() * 1.2)
+#     autolabel(rects4, ax2, is_value=True)
+#     autolabel(rects5, ax2, is_value=True)
+#     autolabel(rects6, ax2, is_value=True)
+#
+#     # --- PLOT 3: QUANTITIES (ROP vs SS) ---
+#     rects7 = ax3.bar(x - width, plot_data['Total Old SS (Qty)'], width, label='Old SS (Qty)', color='lightgrey')
+#     rects8 = ax3.bar(x, plot_data['Total Reorder Point (Qty)'], width, label='New ROP (Qty)', color='#a6cee3') # Different shade for ROP
+#     rects9 = ax3.bar(x + width, plot_data['Total ROP - SS Qty Diff'], width, label='Qty ROP-SS Diff', color='#fb9a99')
+#
+#     ax3.set_ylabel('Quantity (pcs)')
+#     ax3.set_title('ROP vs Current SS Comparison - Quantities')
+#     ax3.set_xticks(x)
+#     ax3.set_xticklabels(labels)
+#     ax3.legend()
+#     ax3.grid(axis='y', linestyle='--', alpha=0.3)
+#     all_qty3 = plot_data[['Total Old SS (Qty)', 'Total Reorder Point (Qty)', 'Total ROP - SS Qty Diff']]
+#     ax3.set_ylim(all_qty3.min().min() * 1.2, all_qty3.max().max() * 1.2)
+#     autolabel(rects7, ax3)
+#     autolabel(rects8, ax3)
+#     autolabel(rects9, ax3)
+#
+#     # --- PLOT 4: VALUES (ROP vs SS) ---
+#     rects10 = ax4.bar(x - width, plot_data['Total Old SS Value [EUR]'], width, label='Old SS Value (EUR)', color='#762a83')
+#     rects11 = ax4.bar(x, plot_data['Total ROP Value [EUR]'], width, label='Total ROP Value (EUR)', color='#33a02c')
+#     rects12 = ax4.bar(x + width, plot_data['Value Difference ROP - SS [EUR]'], width, label='Value Diff ROP-SS (EUR)', color='#e31a1c')
+#
+#     ax4.set_ylabel('Value (EUR)')
+#     ax4.set_title('ROP vs Current SS Value Comparison')
+#     ax4.set_xticks(x)
+#     ax4.set_xticklabels(labels)
+#     ax4.legend(loc='upper left')
+#     ax4.grid(axis='y', linestyle='--', alpha=0.3)
+#     all_val4 = plot_data[['Total Old SS Value [EUR]', 'Total ROP Value [EUR]', 'Value Difference ROP - SS [EUR]']]
+#     ax4.set_ylim(all_val4.min().min() * 1.2, all_val4.max().max() * 1.2)
+#     autolabel(rects10, ax4, is_value=True)
+#     autolabel(rects11, ax4, is_value=True)
+#     autolabel(rects12, ax4, is_value=True)
+#
+#     plt.tight_layout()
+#
+#     if save_path:
+#         plt.savefig(save_path, dpi=300)
+#
+#     # plt.show()
+#     plt.close(fig)
+#
+#     return fig
+
+def export_df_to_excel_file(df, file_path):
+    df = df[[
+        'plant', 'material', 'material_description', 'lead_time',
+        'daily_avg_consumption', 'new_safety_stock', 'new_ss_range', 'reorder_point', 'safety_stock_in_SAP', 'ss_diff',
+        'rop_ss_diff', 'volatility_method', 'is_no_ss_item'
+    ]]
+
+    df.to_excel(file_path, index=False)
