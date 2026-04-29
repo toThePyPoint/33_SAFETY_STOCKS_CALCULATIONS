@@ -296,12 +296,12 @@ def create_a_summary_plot_ss_to_ss_comparison(plant_summary, save_path=None):
     ax1.set_title('Safety Stock Comparison - Quantities')
     ax1.set_xticks(x)
     ax1.set_xticklabels(labels)
-    ax1.legend()
+    ax1.legend(fontsize=7)
     ax1.grid(axis='y', linestyle='--', alpha=0.3)
 
     # Expand Y-axis to fit labels (min/max with padding)
     all_qty = plot_data[['Total Old SS (Qty)', 'Total New SS (Qty)', 'Total SS - SS Qty Diff']]
-    ax1.set_ylim(all_qty.min().min() * 1.2, all_qty.max().max() * 1.2)
+    ax1.set_ylim(all_qty.min().min() * 1.3, all_qty.max().max() * 1.3)
 
     autolabel(rects1, ax1, position='left')
     autolabel(rects2, ax1, position='right')
@@ -318,12 +318,12 @@ def create_a_summary_plot_ss_to_ss_comparison(plant_summary, save_path=None):
     ax2.set_title('Safety Stock Value Comparison')
     ax2.set_xticks(x)
     ax2.set_xticklabels(labels)
-    ax2.legend()
+    ax2.legend(fontsize=7)
     ax2.grid(axis='y', linestyle='--', alpha=0.3)
 
     # Expand Y-axis for values
     all_val = plot_data[['Total Old SS Value [EUR]', 'Total New SS Value [EUR]', 'Value Difference SS - SS [EUR]']]
-    ax2.set_ylim(all_val.min().min() * 1.2, all_val.max().max() * 1.2)
+    ax2.set_ylim(all_val.min().min() * 1.4, all_val.max().max() * 1.4)
 
     autolabel(rects4, ax2, is_value=True, position='left')
     autolabel(rects5, ax2, is_value=True, position='right')
@@ -383,14 +383,21 @@ def create_a_summary_plot_rop_to_ss_comparison(plant_summary, save_path=None):
     ax1.set_title('ROP vs Current SS Comparison - Quantities')
     ax1.set_xticks(x)
     ax1.set_xticklabels(labels)
-    ax1.legend(loc='upper left')
+    ax1.legend(fontsize=7)
     ax1.grid(axis='y', linestyle='--', alpha=0.3)
 
-    # --- FIX 2: Better Y-margin ---
-    # We use a larger multiplier and sym_log-like padding for the frame issue
+    # --- FIX: Gwarantowany odstęp od ramki ---
     all_qty = plot_data[['Total Old SS (Qty)', 'Total Reorder Point (Qty)', 'Total ROP - SS Qty Diff']]
     y_min, y_max = all_qty.min().min(), all_qty.max().max()
-    ax1.set_ylim(y_min * 1.3 if y_min < 0 else 0, y_max * 1.3)
+
+    # Obliczamy całkowitą wysokość danych
+    y_range = y_max - y_min if y_max != y_min else 10
+
+    # Ustawiamy limity z dużym zapasem (np. 30% zakresu w każdą stronę)
+    ax1.set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
+
+    ax1.margins(y=0.4)
+    ax2.margins(y=0.4)
 
     autolabel(rects7, ax1, position='left')
     autolabel(rects8, ax1, position='right')
@@ -407,12 +414,18 @@ def create_a_summary_plot_rop_to_ss_comparison(plant_summary, save_path=None):
     ax2.set_title('ROP vs Current SS Value Comparison')
     ax2.set_xticks(x)
     ax2.set_xticklabels(labels)
-    ax2.legend(loc='upper left')
+    ax2.legend(fontsize=7)
     ax2.grid(axis='y', linestyle='--', alpha=0.3)
 
+    # --- FIX: Gwarantowany odstęp od ramki ---
     all_val = plot_data[['Total Old SS Value [EUR]', 'Total ROP Value [EUR]', 'Value Difference ROP - SS [EUR]']]
     y_min_v, y_max_v = all_val.min().min(), all_val.max().max()
-    ax2.set_ylim(y_min_v * 1.3 if y_min_v < 0 else 0, y_max_v * 1.3)
+
+    # Obliczamy całkowitą wysokość danych
+    y_range_v = y_max_v - y_min_v if y_max_v != y_min_v else 100
+
+    # Ustawiamy limity z dużym zapasem
+    ax2.set_ylim(y_min_v - 0.1 * y_range_v, y_max_v + 0.1 * y_range_v)
 
     autolabel(rects10, ax2, is_value=True, position='left')
     autolabel(rects11, ax2, is_value=True, position='right')
