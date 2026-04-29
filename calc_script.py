@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 
 def create_stats_df(mb51_path, zsbe_path, prd_plant, get_all_dates, start_date, end_date, k_parameter,
-                    ex_rates):
+                    ex_rates, std_mad_treshold):
     # Mapping for mb51_df (Snake Case)
     mb51_rename = {
         'Zakład': 'plant',
@@ -91,13 +91,32 @@ def create_stats_df(mb51_path, zsbe_path, prd_plant, get_all_dates, start_date, 
     ).fillna(0)
 
     # Group by material and plant to calculate statistics
-    stats_df = final_df.groupby(['material', 'plant'])['quantity'].agg(['mean', 'std']).reset_index()
+    # stats_df = final_df.groupby(['material', 'plant'])['quantity'].agg(['mean', 'std']).reset_index()
 
-    # Rename columns to more descriptive names (Snake Case)
-    stats_df.rename(columns={
-        'mean': 'daily_avg_consumption',
-        'std': 'daily_std_dev'
-    }, inplace=True)
+    stats_df = final_df.groupby(['material', 'plant'])['quantity'].agg(
+        daily_avg_consumption='mean',
+        daily_std_dev='std',
+        daily_mad=lambda x: np.mean(np.abs(x - np.mean(x)))
+    ).reset_index()
+
+    # Attach old safety stock for comparison
+    old_ss = zsbe_df[['material', 'plant', 'safety_stock_in_SAP']]
+    stats_df = pd.merge(stats_df, old_ss, on=['material', 'plant'], how='left')
+
+    stats_df['std_mad_ratio'] = stats_df['daily_std_dev'] / stats_df['daily_mad']
+    stats_df['daily_mad'] = stats_df['daily_mad'].replace(0, np.nan)
+    stats_df['std_mad_ratio'] = stats_df['daily_std_dev'] / stats_df['daily_mad']
+
+    stats_df['volatility_measure'] = np.where(
+        (stats_df['std_mad_ratio'] > std_mad_treshold) & (stats_df['safety_stock_in_SAP'].fillna(0) == 0),
+        stats_df['daily_mad'],  # outlier case
+        stats_df['daily_std_dev']  # normal case
+    )
+    # # Rename columns to more descriptive names (Snake Case)
+    # stats_df.rename(columns={
+    #     'mean': 'daily_avg_consumption',
+    #     'std': 'daily_std_dev'
+    # }, inplace=True)
 
     # Handle missing values (if std could not be calculated, e.g. no variability)
     stats_df['daily_std_dev'] = stats_df['daily_std_dev'].fillna(0)
@@ -126,8 +145,17 @@ def create_stats_df(mb51_path, zsbe_path, prd_plant, get_all_dates, start_date, 
 
     # Now you can merge this with your statistics table
     stats_df = pd.merge(stats_df, lead_times[['material', 'plant', 'lead_time']], on=['material', 'plant'], how='left')
+    # stats_df['new_safety_stock'] = (
+    #         k_parameter * stats_df['daily_std_dev'] * np.sqrt(stats_df['lead_time'])
+    # )
     stats_df['new_safety_stock'] = (
-            k_parameter * stats_df['daily_std_dev'] * np.sqrt(stats_df['lead_time'])
+            k_parameter * stats_df['volatility_measure'] * np.sqrt(stats_df['lead_time'])
+    )
+    stats_df['volatility_method'] = np.where(
+        (stats_df['std_mad_ratio'] > std_mad_treshold) &
+        (stats_df['safety_stock_in_SAP'].fillna(0) == 0),
+        'MAD',
+        'STD'
     )
 
     # Round up (since you cannot have 0.5 units in stock)
@@ -162,22 +190,14 @@ def create_stats_df(mb51_path, zsbe_path, prd_plant, get_all_dates, start_date, 
                             ) / stats_df['price_unit']
 
     # Round to 2 decimal places (monetary value)
-    stats_df['new_safety_stock_value'] = stats_df['safety_stock_value'].round(2)
+    stats_df['new_safety_stock_value'] = stats_df['new_safety_stock_value'].round(2)
     stats_df['ROP_value'] = stats_df['ROP_value'].round(2)
-
-    # Attach old safety stock for comparison
-    old_ss = zsbe_df[['material', 'plant', 'safety_stock_in_SAP']]
-    stats_df = pd.merge(stats_df, old_ss, on=['material', 'plant'], how='left')
 
     # Check the difference
     stats_df['ss_diff'] = stats_df['new_safety_stock'] - stats_df['safety_stock_in_SAP']
 
     stats_df['new_ss_range'] = stats_df['new_safety_stock'] / stats_df['daily_avg_consumption']
     stats_df['new_ss_range'] = stats_df['new_ss_range'].round(2)
-
-    stats_df = stats_df[['plant', 'material', 'material_description', 'daily_std_dev', 'lead_time',
-                         'daily_avg_consumption', 'new_safety_stock', 'new_ss_range', 'new_safety_stock_value',
-                         'reorder_point', 'ROP_value', 'safety_stock_in_SAP', 'ss_diff']]
 
     return stats_df
 
@@ -187,7 +207,7 @@ def create_plant_summary(stats_df):
         'new_safety_stock': 'sum',
         'safety_stock_in_SAP': 'sum',
         'ss_diff': 'sum',
-        'safety_stock_value': 'sum'
+        'new_safety_stock_value': 'sum'
     }).reset_index()
 
     # 2. Calculate the value of the previous safety stock (earlier)
@@ -199,14 +219,14 @@ def create_plant_summary(stats_df):
     plant_summary = pd.merge(plant_summary, old_value_sum, on='plant')
 
     # 3. Add a column with value difference (how much capital is released or tied up)
-    plant_summary['value_diff'] = plant_summary['safety_stock_value'] - plant_summary['old_ss_value']
+    plant_summary['value_diff'] = plant_summary['new_safety_stock_value'] - plant_summary['old_ss_value']
 
     # 4. Rename columns to be more readable for reporting
     plant_summary.rename(columns={
         'new_safety_stock': 'Total New SS (Qty)',
         'safety_stock_in_SAP': 'Total Old SS (Qty)',
         'ss_diff': 'Total Qty Diff',
-        'safety_stock_value': 'Total New SS Value [EUR]',
+        'new_safety_stock_value': 'Total New SS Value [EUR]',
         'old_ss_value': 'Total Old SS Value [EUR]',
         'value_diff': 'Value Difference [EUR]'
     }, inplace=True)
