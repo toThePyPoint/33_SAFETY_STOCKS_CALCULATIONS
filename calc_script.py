@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def create_stats_df(mb51_path, zsbe_path, prd_plant, get_all_dates, start_date, end_date, k_parameter,
+def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_dates, start_date, end_date, k_parameter,
                     ex_rates, std_mad_treshold):
     # Mapping for mb51_df (Snake Case)
     mb51_rename = {
@@ -37,6 +37,7 @@ def create_stats_df(mb51_path, zsbe_path, prd_plant, get_all_dates, start_date, 
 
     mb51_df = pd.read_excel(mb51_path, dtype={'Materiał': str, 'Zakład': str})
     zsbe_df = pd.read_excel(zsbe_path, dtype={'Materiał': str, 'Zakład': str})
+    no_ss_items_df = pd.read_excel(no_ss_items_path, dtype={'material': str})
     # Renaming
     mb51_df.rename(columns=mb51_rename, inplace=True)
     zsbe_df.rename(columns=zsbe_rename, inplace=True)
@@ -167,6 +168,11 @@ def create_stats_df(mb51_path, zsbe_path, prd_plant, get_all_dates, start_date, 
 
     # Round up
     stats_df['reorder_point'] = np.ceil(stats_df['reorder_point']).astype(int)
+
+    # Set new_safety_stock and ROP to zero for materials present in no_ss_items_df
+    print(no_ss_items_df)
+    stats_df.loc[stats_df['material'].isin(no_ss_items_df['material']), 'new_safety_stock'] = 0
+    stats_df.loc[stats_df['material'].isin(no_ss_items_df['material']), 'reorder_point'] = 0
 
     # Create a new column with converted price
     # .map() matches the currency to the exchange rate, then we multiply it by the unit price
