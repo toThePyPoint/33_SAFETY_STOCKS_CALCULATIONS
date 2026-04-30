@@ -237,6 +237,9 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_d
     stats_df = pd.merge(stats_df, price_data, on=['material', 'plant'], how='left')
 
     # Calculate value
+    # 1. Calculate old_ss_value first to include it in the main aggregation
+    stats_df['old_ss_value'] = (stats_df['safety_stock_in_SAP'] * stats_df['unit_price_eur']) / stats_df['price_unit']
+
     stats_df['new_safety_stock_value'] = (
                                              stats_df['new_safety_stock'] * stats_df['unit_price_eur']
                                      ) / stats_df['price_unit']
@@ -248,6 +251,7 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_d
     # Round to 2 decimal places (monetary value)
     stats_df['new_safety_stock_value'] = stats_df['new_safety_stock_value'].round(2)
     stats_df['ROP_value'] = stats_df['ROP_value'].round(2)
+    stats_df['old_ss_value'] = stats_df['old_ss_value'].round(2)
 
     # Check the difference
     stats_df['ss_diff'] = stats_df['new_safety_stock'] - stats_df['safety_stock_in_SAP']
@@ -261,9 +265,6 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_d
 
 
 def create_plant_summary(stats_df):
-    # 1. Calculate old_ss_value first to include it in the main aggregation
-    stats_df['old_ss_value'] = (stats_df['safety_stock_in_SAP'] * stats_df['unit_price_eur']) / stats_df['price_unit']
-
     # 2. Aggregate everything in ONE step to avoid merge conflicts/duplicates
     plant_summary = stats_df.groupby('plant').agg({
         'new_safety_stock': 'sum',
@@ -716,6 +717,35 @@ def create_new_safety_stocks_df(stats_by_product_group):
     return pd.concat(new_safety_stocks, ignore_index=True)[columns]
 
 
+def create_safety_stocks_to_be_deleted_df(stats_by_product_group):
+    columns = [
+        'product_group',
+        'plant',
+        'material',
+        'material_description',
+        'daily_avg_consumption',
+        'reorder_point',
+        'new_safety_stock',
+        'safety_stock_in_SAP',
+        'old_ss_value'
+    ]
+    safety_stocks_to_be_deleted = []
+
+    for product_group, stats_df in stats_by_product_group.items():
+        mask = (
+                (stats_df['new_safety_stock'] == 0) &
+                (stats_df['safety_stock_in_SAP'].fillna(0) > 0)
+        )
+        product_group_safety_stocks_to_be_deleted = stats_df.loc[mask, columns[1:]].copy()
+        product_group_safety_stocks_to_be_deleted.insert(0, 'product_group', product_group)
+        safety_stocks_to_be_deleted.append(product_group_safety_stocks_to_be_deleted)
+
+    if not safety_stocks_to_be_deleted:
+        return pd.DataFrame(columns=columns)
+
+    return pd.concat(safety_stocks_to_be_deleted, ignore_index=True)[columns]
+
+
 def _display_report_item(display_output, item):
     if not display_output:
         return
@@ -754,6 +784,7 @@ def create_many_product_groups_report(
         min_value_for_new_ss=0,
         output_directory=None,
         new_safety_stocks_file_name=None,
+        safety_stocks_to_be_deleted_file_name=None,
         display_output=True,
         show_group_charts=True,
         show_final_charts=True,
@@ -801,10 +832,15 @@ def create_many_product_groups_report(
     all_products_summary = create_all_products_summary(product_summary_rows)
     all_product_groups_plant_summary = create_all_product_groups_plant_summary(plant_summaries)
     new_safety_stocks_df = create_new_safety_stocks_df(stats_by_product_group)
+    safety_stocks_to_be_deleted_df = create_safety_stocks_to_be_deleted_df(stats_by_product_group)
 
     if output_directory and new_safety_stocks_file_name:
         new_safety_stocks_file_path = Path(output_directory) / new_safety_stocks_file_name
         new_safety_stocks_df.to_excel(new_safety_stocks_file_path, index=False)
+
+    if output_directory and safety_stocks_to_be_deleted_file_name:
+        safety_stocks_to_be_deleted_file_path = Path(output_directory) / safety_stocks_to_be_deleted_file_name
+        safety_stocks_to_be_deleted_df.to_excel(safety_stocks_to_be_deleted_file_path, index=False)
 
     final_figures = {}
 
@@ -812,6 +848,10 @@ def create_many_product_groups_report(
         _display_report_header(
             display_output,
             f'## New safety stocks to be created: {len(new_safety_stocks_df)}'
+        )
+        _display_report_header(
+            display_output,
+            f'## Safety stocks to be deleted: {len(safety_stocks_to_be_deleted_df)}'
         )
 
         _display_report_header(display_output, '## All product groups plant summary')
@@ -839,6 +879,7 @@ def create_many_product_groups_report(
         'all_products_summary': all_products_summary,
         'all_product_groups_plant_summary': all_product_groups_plant_summary,
         'new_safety_stocks_df': new_safety_stocks_df,
+        'safety_stocks_to_be_deleted_df': safety_stocks_to_be_deleted_df,
         'stats_by_product_group': stats_by_product_group,
         'plant_summary_by_product_group': plant_summary_by_product_group,
         'group_figures': group_figures,
