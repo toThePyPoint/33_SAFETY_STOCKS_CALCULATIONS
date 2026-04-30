@@ -689,6 +689,33 @@ def create_all_product_groups_plant_summary(plant_summaries):
     return all_product_groups_plant_summary[plant_summaries[-1].columns]
 
 
+def create_new_safety_stocks_df(stats_by_product_group):
+    columns = [
+        'product_group',
+        'plant',
+        'material',
+        'material_description',
+        'daily_avg_consumption',
+        'reorder_point',
+        'new_safety_stock',
+    ]
+    new_safety_stocks = []
+
+    for product_group, stats_df in stats_by_product_group.items():
+        mask = (
+                (stats_df['new_safety_stock'] > 0) &
+                (stats_df['safety_stock_in_SAP'].fillna(0) == 0)
+        )
+        product_group_new_safety_stocks = stats_df.loc[mask, columns[1:]].copy()
+        product_group_new_safety_stocks.insert(0, 'product_group', product_group)
+        new_safety_stocks.append(product_group_new_safety_stocks)
+
+    if not new_safety_stocks:
+        return pd.DataFrame(columns=columns)
+
+    return pd.concat(new_safety_stocks, ignore_index=True)[columns]
+
+
 def _display_report_item(display_output, item):
     if not display_output:
         return
@@ -726,6 +753,7 @@ def create_many_product_groups_report(
         std_mad_treshold,
         min_value_for_new_ss=0,
         output_directory=None,
+        new_safety_stocks_file_name=None,
         display_output=True,
         show_group_charts=True,
         show_final_charts=True,
@@ -772,10 +800,20 @@ def create_many_product_groups_report(
 
     all_products_summary = create_all_products_summary(product_summary_rows)
     all_product_groups_plant_summary = create_all_product_groups_plant_summary(plant_summaries)
+    new_safety_stocks_df = create_new_safety_stocks_df(stats_by_product_group)
+
+    if output_directory and new_safety_stocks_file_name:
+        new_safety_stocks_file_path = Path(output_directory) / new_safety_stocks_file_name
+        new_safety_stocks_df.to_excel(new_safety_stocks_file_path, index=False)
 
     final_figures = {}
 
     if show_final_charts:
+        _display_report_header(
+            display_output,
+            f'## New safety stocks to be created: {len(new_safety_stocks_df)}'
+        )
+
         _display_report_header(display_output, '## All product groups plant summary')
         _display_report_item(display_output, all_product_groups_plant_summary)
 
@@ -800,6 +838,7 @@ def create_many_product_groups_report(
         'all_files': all_files,
         'all_products_summary': all_products_summary,
         'all_product_groups_plant_summary': all_product_groups_plant_summary,
+        'new_safety_stocks_df': new_safety_stocks_df,
         'stats_by_product_group': stats_by_product_group,
         'plant_summary_by_product_group': plant_summary_by_product_group,
         'group_figures': group_figures,
