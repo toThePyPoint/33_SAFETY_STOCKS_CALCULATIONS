@@ -479,7 +479,7 @@ def create_a_summary_plot_rop_to_ss_comparison(plant_summary, save_path=None, ch
 
 def create_all_products_summary_plot_ss_to_ss_comparison(all_products_summary, save_path=None, chart_style=None):
     style = _get_chart_style(chart_style)
-    plot_data = all_products_summary.copy()
+    plot_data = all_products_summary[all_products_summary['product_group'] != 'TOTAL'].copy()
     labels = plot_data['product_group'].astype(str)
     x = np.arange(len(labels))
     width = 0.25
@@ -548,7 +548,7 @@ def create_all_products_summary_plot_ss_to_ss_comparison(all_products_summary, s
 
 def create_all_products_summary_plot_rop_to_ss_comparison(all_products_summary, save_path=None, chart_style=None):
     style = _get_chart_style(chart_style)
-    plot_data = all_products_summary.copy()
+    plot_data = all_products_summary[all_products_summary['product_group'] != 'TOTAL'].copy()
     labels = plot_data['product_group'].astype(str)
     x = np.arange(len(labels))
     width = 0.25
@@ -632,4 +632,160 @@ def get_input_files(directory, prd_groups):
             str(directory / f"{prd_group}_items_and_parameters.XLSX"),
         )
         for prd_group in prd_groups
+    }
+
+
+def create_product_group_summary_row(plant_summary, product_group):
+    product_summary = plant_summary.select_dtypes(include='number').sum().to_dict()
+    product_summary['product_group'] = product_group
+    return product_summary
+
+
+def create_all_products_summary(product_summary_rows, add_total=True, total_label='TOTAL'):
+    all_products_summary = pd.DataFrame(product_summary_rows)
+
+    if all_products_summary.empty:
+        return all_products_summary
+
+    all_products_summary = all_products_summary[
+        ['product_group'] + [col for col in all_products_summary.columns if col != 'product_group']
+    ]
+
+    if add_total:
+        total_row = all_products_summary.select_dtypes(include='number').sum().to_dict()
+        total_row['product_group'] = total_label
+        all_products_summary = pd.concat(
+            [all_products_summary, pd.DataFrame([total_row])],
+            ignore_index=True
+        )
+
+    return all_products_summary
+
+
+def create_all_product_groups_plant_summary(plant_summaries):
+    if not plant_summaries:
+        return pd.DataFrame()
+
+    all_product_groups_plant_summary = pd.concat(plant_summaries, ignore_index=True)
+    all_product_groups_plant_summary = all_product_groups_plant_summary.groupby(
+        'plant',
+        as_index=False
+    ).sum(numeric_only=True)
+
+    return all_product_groups_plant_summary[plant_summaries[-1].columns]
+
+
+def _display_report_item(display_output, item):
+    if not display_output:
+        return
+
+    try:
+        from IPython.display import display
+    except ImportError:
+        return
+
+    display(item)
+
+
+def _display_report_header(display_output, text):
+    if not display_output:
+        return
+
+    try:
+        from IPython.display import Markdown
+    except ImportError:
+        return
+
+    _display_report_item(display_output, Markdown(text))
+
+
+def create_many_product_groups_report(
+        input_directory,
+        product_groups,
+        no_ss_items_path,
+        prd_plant,
+        get_all_dates,
+        start_date,
+        end_date,
+        k_parameter,
+        ex_rates,
+        std_mad_treshold,
+        output_directory=None,
+        display_output=True,
+        show_group_charts=True,
+        show_final_charts=True,
+        chart_style=None
+):
+    all_files = get_input_files(input_directory, product_groups)
+    product_summary_rows = []
+    plant_summaries = []
+    stats_by_product_group = {}
+    plant_summary_by_product_group = {}
+    group_figures = {}
+
+    for product_group, (mb51_f_path, zsbe_f_path) in all_files.items():
+        _display_report_header(display_output, f'## Calculating: {product_group}')
+
+        stats_df = create_stats_df(
+            mb51_f_path,
+            zsbe_f_path,
+            no_ss_items_path,
+            prd_plant,
+            get_all_dates,
+            start_date,
+            end_date,
+            k_parameter,
+            ex_rates,
+            std_mad_treshold
+        )
+        plant_summary = create_plant_summary(stats_df)
+
+        stats_by_product_group[product_group] = stats_df
+        plant_summary_by_product_group[product_group] = plant_summary
+        plant_summaries.append(plant_summary)
+        product_summary_rows.append(create_product_group_summary_row(plant_summary, product_group))
+
+        if show_group_charts:
+            fig_rop = create_a_summary_plot_rop_to_ss_comparison(plant_summary, chart_style=chart_style)
+            group_figures[product_group] = fig_rop
+            _display_report_item(display_output, fig_rop)
+
+        if output_directory:
+            output_file_path = Path(output_directory) / f'{product_group}_ss_summary.xlsx'
+            export_df_to_excel_file(stats_df, output_file_path)
+
+    all_products_summary = create_all_products_summary(product_summary_rows)
+    all_product_groups_plant_summary = create_all_product_groups_plant_summary(plant_summaries)
+
+    final_figures = {}
+
+    if show_final_charts:
+        _display_report_header(display_output, '## All product groups plant summary')
+        _display_report_item(display_output, all_product_groups_plant_summary)
+
+        fig_all_products_plant_summary = create_a_summary_plot_rop_to_ss_comparison(
+            all_product_groups_plant_summary,
+            chart_style=chart_style
+        )
+        final_figures['all_product_groups_plant_summary_rop'] = fig_all_products_plant_summary
+        _display_report_item(display_output, fig_all_products_plant_summary)
+
+        _display_report_header(display_output, '## All products summary')
+        _display_report_item(display_output, all_products_summary)
+
+        fig_all_products = create_all_products_summary_plot_rop_to_ss_comparison(
+            all_products_summary,
+            chart_style=chart_style
+        )
+        final_figures['all_products_summary_rop'] = fig_all_products
+        _display_report_item(display_output, fig_all_products)
+
+    return {
+        'all_files': all_files,
+        'all_products_summary': all_products_summary,
+        'all_product_groups_plant_summary': all_product_groups_plant_summary,
+        'stats_by_product_group': stats_by_product_group,
+        'plant_summary_by_product_group': plant_summary_by_product_group,
+        'group_figures': group_figures,
+        'final_figures': final_figures,
     }
