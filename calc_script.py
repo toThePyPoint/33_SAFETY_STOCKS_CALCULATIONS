@@ -49,7 +49,7 @@ def _set_padded_ylim(ax, data, padding=0.1, fallback_range=10):
 
 
 def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_dates, start_date, end_date, k_parameter,
-                    ex_rates, std_mad_treshold):
+                    ex_rates, std_mad_treshold, min_value_for_new_ss=0):
     # Mapping for mb51_df (Snake Case)
     mb51_rename = {
         'Zakład': 'plant',
@@ -209,10 +209,17 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_d
 
     # Initialize the 'no_ss_item' column with False as the default value
     stats_df['is_no_ss_item'] = False
+    stats_df['is_below_min_ss'] = False
 
     # save calculated values in separate columns
     stats_df['calculated_new_ss'] = stats_df['new_safety_stock']
     stats_df['calculated_new_ROP'] = stats_df['reorder_point']
+
+    small_new_ss_mask = (
+            (stats_df['new_safety_stock'] < min_value_for_new_ss) &
+            (stats_df['safety_stock_in_SAP'].fillna(0) == 0)
+    )
+    stats_df.loc[small_new_ss_mask, ['new_safety_stock', 'reorder_point', 'is_below_min_ss']] = [0, 0, True]
 
     # For matching rows, update the stock parameters to zero and set the flag to True
     stats_df.loc[mask, ['new_safety_stock', 'reorder_point', 'is_no_ss_item']] = [0, 0, True]
@@ -251,6 +258,7 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_d
     stats_df['new_ss_range'] = stats_df['new_ss_range'].round(2)
 
     return stats_df
+
 
 def create_plant_summary(stats_df):
     # 1. Calculate old_ss_value first to include it in the main aggregation
@@ -300,6 +308,7 @@ def create_plant_summary(stats_df):
     plant_summary[existing_cols] = plant_summary[existing_cols].round(0).astype(int)
 
     return plant_summary
+
 
 def create_a_summary_plot_ss_to_ss_comparison(plant_summary, save_path=None, chart_style=None):
     # Prepare data
@@ -382,6 +391,7 @@ def create_a_summary_plot_ss_to_ss_comparison(plant_summary, save_path=None, cha
     plt.close(fig)
 
     return fig
+
 
 def create_a_summary_plot_rop_to_ss_comparison(plant_summary, save_path=None, chart_style=None):
     # Prepare data
@@ -477,6 +487,7 @@ def create_a_summary_plot_rop_to_ss_comparison(plant_summary, save_path=None, ch
 
     return fig
 
+
 def create_all_products_summary_plot_ss_to_ss_comparison(all_products_summary, save_path=None, chart_style=None):
     style = _get_chart_style(chart_style)
     plot_data = all_products_summary[all_products_summary['product_group'] != 'TOTAL'].copy()
@@ -545,6 +556,7 @@ def create_all_products_summary_plot_ss_to_ss_comparison(all_products_summary, s
     plt.close(fig)
 
     return fig
+
 
 def create_all_products_summary_plot_rop_to_ss_comparison(all_products_summary, save_path=None, chart_style=None):
     style = _get_chart_style(chart_style)
@@ -615,14 +627,16 @@ def create_all_products_summary_plot_rop_to_ss_comparison(all_products_summary, 
 
     return fig
 
+
 def export_df_to_excel_file(df, file_path):
     df = df[[
         'plant', 'material', 'material_description', 'lead_time',
         'daily_avg_consumption', 'new_safety_stock', 'new_ss_range', 'reorder_point', 'safety_stock_in_SAP', 'ss_diff',
-        'rop_ss_diff', 'volatility_method', 'is_no_ss_item'
+        'rop_ss_diff', 'volatility_method', 'is_no_ss_item', 'is_below_min_ss', 'calculated_new_ss', 'calculated_new_ROP'
     ]]
 
     df.to_excel(file_path, index=False)
+
 
 def get_input_files(directory, prd_groups):
     directory = Path(directory)
@@ -710,6 +724,7 @@ def create_many_product_groups_report(
         k_parameter,
         ex_rates,
         std_mad_treshold,
+        min_value_for_new_ss=0,
         output_directory=None,
         display_output=True,
         show_group_charts=True,
@@ -736,7 +751,8 @@ def create_many_product_groups_report(
             end_date,
             k_parameter,
             ex_rates,
-            std_mad_treshold
+            std_mad_treshold,
+            min_value_for_new_ss
         )
         plant_summary = create_plant_summary(stats_df)
 
