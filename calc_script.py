@@ -26,6 +26,7 @@ def _get_chart_style(chart_style=None):
 
 
 def _format_chart_axis(ax, title, ylabel, x, labels, style):
+    ax.set_axisbelow(True)
     ax.set_ylabel(ylabel, fontsize=style['axis_label_fontsize'])
     ax.set_title(title, fontsize=style['title_fontsize'], fontweight=style['title_fontweight'])
     ax.set_xticks(x)
@@ -37,7 +38,8 @@ def _format_chart_axis(ax, title, ylabel, x, labels, style):
     )
     ax.tick_params(axis='y', labelsize=style['tick_label_fontsize'])
     ax.legend(fontsize=style['legend_fontsize'])
-    ax.grid(axis='y', linestyle='--', alpha=style['grid_alpha'])
+    ax.xaxis.grid(False)
+    ax.yaxis.grid(True, linestyle='--', alpha=style['grid_alpha'], zorder=0)
 
 
 def _set_padded_ylim(ax, data, padding=0.1, fallback_range=10):
@@ -336,9 +338,12 @@ def create_a_summary_plot_ss_to_ss_comparison(plant_summary, save_path=None, cha
                         fontsize=style['bar_label_fontsize'], fontweight=style['bar_label_fontweight'])
 
     # --- PLOT 1: QUANTITIES ---
-    rects1 = ax1.bar(x - width, plot_data['Total Old SS (Qty)'], width, label='Old SS (Qty)', color='lightgrey')
-    rects2 = ax1.bar(x, plot_data['Total New SS (Qty)'], width, label='New SS (Qty)', color='skyblue')
-    rects3 = ax1.bar(x + width, plot_data['Total SS - SS Qty Diff'], width, label='Qty SS - SS Diff', color='orange')
+    rects1 = ax1.bar(x - width, plot_data['Total Old SS (Qty)'], width, label='Old SS (Qty)', color='lightgrey',
+                     edgecolor='none', linewidth=0, zorder=3)
+    rects2 = ax1.bar(x, plot_data['Total New SS (Qty)'], width, label='New SS (Qty)', color='skyblue',
+                     edgecolor='none', linewidth=0, zorder=3)
+    rects3 = ax1.bar(x + width, plot_data['Total SS - SS Qty Diff'], width, label='Qty SS - SS Diff', color='orange',
+                     edgecolor='none', linewidth=0, zorder=3)
 
     _format_chart_axis(ax1, 'Safety Stock Comparison - Quantities', 'Quantity (pcs)', x, labels, style)
 
@@ -352,10 +357,11 @@ def create_a_summary_plot_ss_to_ss_comparison(plant_summary, save_path=None, cha
 
     # --- PLOT 2: VALUES (Value in EUR) ---
     rects4 = ax2.bar(x - width, plot_data['Total Old SS Value [EUR]'], width, label='Old SS Value (EUR)',
-                     color='#762a83')
-    rects5 = ax2.bar(x, plot_data['Total New SS Value [EUR]'], width, label='New SS Value (EUR)', color='#1b7837')
+                     color='#762a83', edgecolor='none', linewidth=0, zorder=3)
+    rects5 = ax2.bar(x, plot_data['Total New SS Value [EUR]'], width, label='New SS Value (EUR)', color='#1b7837',
+                     edgecolor='none', linewidth=0, zorder=3)
     rects6 = ax2.bar(x + width, plot_data['Value Difference SS - SS [EUR]'], width, label='Value Difference SS - SS (EUR)',
-                     color='#d73027')
+                     color='#d73027', edgecolor='none', linewidth=0, zorder=3)
 
     _format_chart_axis(ax2, 'Safety Stock Value Comparison', 'Value (EUR)', x, labels, style)
 
@@ -414,9 +420,12 @@ def create_a_summary_plot_rop_to_ss_comparison(plant_summary, save_path=None, ch
                         fontsize=style['bar_label_fontsize'], fontweight=style['bar_label_fontweight'])
 
     # --- PLOT 1: QUANTITIES ---
-    rects7 = ax1.bar(x - width, plot_data['Total Old SS (Qty)'], width, label='Old SS (Qty)', color='lightgrey')
-    rects8 = ax1.bar(x, plot_data['Total Reorder Point (Qty)'], width, label='New ROP (Qty)', color='#a6cee3')
-    rects9 = ax1.bar(x + width, plot_data['Total ROP - SS Qty Diff'], width, label='Qty ROP - SS Diff', color='#fb9a99')
+    rects7 = ax1.bar(x - width, plot_data['Total Old SS (Qty)'], width, label='Old SS (Qty)', color='lightgrey',
+                     edgecolor='none', linewidth=0, zorder=3)
+    rects8 = ax1.bar(x, plot_data['Total Reorder Point (Qty)'], width, label='New ROP (Qty)', color='#a6cee3',
+                     edgecolor='none', linewidth=0, zorder=3)
+    rects9 = ax1.bar(x + width, plot_data['Total ROP - SS Qty Diff'], width, label='Qty ROP - SS Diff', color='#fb9a99',
+                     edgecolor='none', linewidth=0, zorder=3)
 
     _format_chart_axis(ax1, 'ROP vs Current SS Comparison - Quantities', 'Quantity (pcs)', x, labels, style)
 
@@ -439,10 +448,11 @@ def create_a_summary_plot_rop_to_ss_comparison(plant_summary, save_path=None, ch
 
     # --- PLOT 2: VALUES ---
     rects10 = ax2.bar(x - width, plot_data['Total Old SS Value [EUR]'], width, label='Old SS Value (EUR)',
-                      color='#762a83')
-    rects11 = ax2.bar(x, plot_data['Total ROP Value [EUR]'], width, label='Total ROP Value (EUR)', color='#33a02c')
+                      color='#762a83', edgecolor='none', linewidth=0, zorder=3)
+    rects11 = ax2.bar(x, plot_data['Total ROP Value [EUR]'], width, label='Total ROP Value (EUR)', color='#33a02c',
+                      edgecolor='none', linewidth=0, zorder=3)
     rects12 = ax2.bar(x + width, plot_data['Value Difference ROP - SS [EUR]'], width, label='Value Diff ROP-SS (EUR)',
-                      color='#e31a1c')
+                      color='#e31a1c', edgecolor='none', linewidth=0, zorder=3)
 
     _format_chart_axis(ax2, 'ROP vs Current SS Value Comparison', 'Value (EUR)', x, labels, style)
 
@@ -497,9 +507,12 @@ def create_all_products_summary_plot_ss_to_ss_comparison(all_products_summary, s
                         ha='center', va=va_pos,
                         fontsize=style['bar_label_fontsize'], fontweight=style['bar_label_fontweight'])
 
-    rects1 = ax1.bar(x - width, plot_data['Total Old SS (Qty)'], width, label='Old SS (Qty)', color='lightgrey')
-    rects2 = ax1.bar(x, plot_data['Total New SS (Qty)'], width, label='New SS (Qty)', color='skyblue')
-    rects3 = ax1.bar(x + width, plot_data['Total SS - SS Qty Diff'], width, label='Qty SS - SS Diff', color='orange')
+    rects1 = ax1.bar(x - width, plot_data['Total Old SS (Qty)'], width, label='Old SS (Qty)', color='lightgrey',
+                     edgecolor='none', linewidth=0, zorder=3)
+    rects2 = ax1.bar(x, plot_data['Total New SS (Qty)'], width, label='New SS (Qty)', color='skyblue',
+                     edgecolor='none', linewidth=0, zorder=3)
+    rects3 = ax1.bar(x + width, plot_data['Total SS - SS Qty Diff'], width, label='Qty SS - SS Diff', color='orange',
+                     edgecolor='none', linewidth=0, zorder=3)
 
     _format_chart_axis(ax1, 'Safety Stock Comparison by Product Group - Quantities', 'Quantity (pcs)', x, labels, style)
 
@@ -511,10 +524,11 @@ def create_all_products_summary_plot_ss_to_ss_comparison(all_products_summary, s
     autolabel(rects3, ax1, position='center')
 
     rects4 = ax2.bar(x - width, plot_data['Total Old SS Value [EUR]'], width, label='Old SS Value (EUR)',
-                     color='#762a83')
-    rects5 = ax2.bar(x, plot_data['Total New SS Value [EUR]'], width, label='New SS Value (EUR)', color='#1b7837')
+                     color='#762a83', edgecolor='none', linewidth=0, zorder=3)
+    rects5 = ax2.bar(x, plot_data['Total New SS Value [EUR]'], width, label='New SS Value (EUR)', color='#1b7837',
+                     edgecolor='none', linewidth=0, zorder=3)
     rects6 = ax2.bar(x + width, plot_data['Value Difference SS - SS [EUR]'], width, label='Value Difference SS - SS (EUR)',
-                     color='#d73027')
+                     color='#d73027', edgecolor='none', linewidth=0, zorder=3)
 
     _format_chart_axis(ax2, 'Safety Stock Comparison by Product Group - Values', 'Value (EUR)', x, labels, style)
 
@@ -562,9 +576,12 @@ def create_all_products_summary_plot_rop_to_ss_comparison(all_products_summary, 
                         ha='center', va=va_pos,
                         fontsize=style['bar_label_fontsize'], fontweight=style['bar_label_fontweight'])
 
-    rects7 = ax1.bar(x - width, plot_data['Total Old SS (Qty)'], width, label='Old SS (Qty)', color='lightgrey')
-    rects8 = ax1.bar(x, plot_data['Total Reorder Point (Qty)'], width, label='New ROP (Qty)', color='#a6cee3')
-    rects9 = ax1.bar(x + width, plot_data['Total ROP - SS Qty Diff'], width, label='Qty ROP - SS Diff', color='#fb9a99')
+    rects7 = ax1.bar(x - width, plot_data['Total Old SS (Qty)'], width, label='Old SS (Qty)', color='lightgrey',
+                     edgecolor='none', linewidth=0, zorder=3)
+    rects8 = ax1.bar(x, plot_data['Total Reorder Point (Qty)'], width, label='New ROP (Qty)', color='#a6cee3',
+                     edgecolor='none', linewidth=0, zorder=3)
+    rects9 = ax1.bar(x + width, plot_data['Total ROP - SS Qty Diff'], width, label='Qty ROP - SS Diff', color='#fb9a99',
+                     edgecolor='none', linewidth=0, zorder=3)
 
     _format_chart_axis(ax1, 'ROP vs Current SS by Product Group - Quantities', 'Quantity (pcs)', x, labels, style)
 
@@ -576,10 +593,11 @@ def create_all_products_summary_plot_rop_to_ss_comparison(all_products_summary, 
     autolabel(rects9, ax1, position='center')
 
     rects10 = ax2.bar(x - width, plot_data['Total Old SS Value [EUR]'], width, label='Old SS Value (EUR)',
-                      color='#762a83')
-    rects11 = ax2.bar(x, plot_data['Total ROP Value [EUR]'], width, label='Total ROP Value (EUR)', color='#33a02c')
+                      color='#762a83', edgecolor='none', linewidth=0, zorder=3)
+    rects11 = ax2.bar(x, plot_data['Total ROP Value [EUR]'], width, label='Total ROP Value (EUR)', color='#33a02c',
+                      edgecolor='none', linewidth=0, zorder=3)
     rects12 = ax2.bar(x + width, plot_data['Value Difference ROP - SS [EUR]'], width, label='Value Diff ROP-SS (EUR)',
-                      color='#e31a1c')
+                      color='#e31a1c', edgecolor='none', linewidth=0, zorder=3)
 
     _format_chart_axis(ax2, 'ROP vs Current SS by Product Group - Values', 'Value (EUR)', x, labels, style)
 
