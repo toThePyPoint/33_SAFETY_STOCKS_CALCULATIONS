@@ -165,6 +165,10 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_d
     # Initialize the 'no_ss_item' column with False as the default value
     stats_df['is_no_ss_item'] = False
 
+    # save calculated values in separate columns
+    stats_df['calculated_new_ss'] = stats_df['new_safety_stock']
+    stats_df['calculated_new_ROP'] = stats_df['reorder_point']
+
     # For matching rows, update the stock parameters to zero and set the flag to True
     stats_df.loc[mask, ['new_safety_stock', 'reorder_point', 'is_no_ss_item']] = [0, 0, True]
 
@@ -437,111 +441,6 @@ def create_a_summary_plot_rop_to_ss_comparison(plant_summary, save_path=None):
     plt.close(fig)
 
     return fig
-
-# def create_a_summary_plot(plant_summary, save_path=None):
-#     # Prepare data
-#     plot_data = plant_summary[plant_summary['plant'] != 'TOTAL'].copy()
-#     labels = plot_data['plant'].astype(str)
-#     x = np.arange(len(labels))
-#     width = 0.25
-#
-#     # Change to 2 rows and 2 columns
-#     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(22, 14))
-#
-#     def autolabel(rects, ax, is_value=False):
-#         for rect in rects:
-#             height = rect.get_height()
-#             # Format: thousands separator, 0 decimals for Qty, 2 for Value
-#             label_text = f'{height:,.0f}' if not is_value else f'{height:,.2f}'
-#
-#             # Determine position (above for positive, below for negative)
-#             va_pos = 'bottom' if height >= 0 else 'top'
-#             offset = 3 if height >= 0 else -3
-#
-#             ax.annotate(label_text,
-#                         xy=(rect.get_x() + rect.get_width() / 2, height),
-#                         xytext=(0, offset),
-#                         textcoords="offset points",
-#                         ha='center', va=va_pos,
-#                         fontsize=8, fontweight='bold', rotation=0)
-#
-#     # --- PLOT 1: QUANTITIES (SS vs SS) ---
-#     rects1 = ax1.bar(x - width, plot_data['Total Old SS (Qty)'], width, label='Old SS (Qty)', color='lightgrey')
-#     rects2 = ax1.bar(x, plot_data['Total New SS (Qty)'], width, label='New SS (Qty)', color='skyblue')
-#     rects3 = ax1.bar(x + width, plot_data['Total SS - SS Qty Diff'], width, label='Qty SS-SS Diff', color='orange')
-#
-#     ax1.set_ylabel('Quantity (pcs)')
-#     ax1.set_title('Safety Stock Comparison - Quantities')
-#     ax1.set_xticks(x)
-#     ax1.set_xticklabels(labels)
-#     ax1.legend()
-#     ax1.grid(axis='y', linestyle='--', alpha=0.3)
-#     all_qty1 = plot_data[['Total Old SS (Qty)', 'Total New SS (Qty)', 'Total SS - SS Qty Diff']]
-#     ax1.set_ylim(all_qty1.min().min() * 1.2, all_qty1.max().max() * 1.2)
-#     autolabel(rects1, ax1)
-#     autolabel(rects2, ax1)
-#     autolabel(rects3, ax1)
-#
-#     # --- PLOT 2: VALUES (SS vs SS) ---
-#     rects4 = ax2.bar(x - width, plot_data['Total Old SS Value [EUR]'], width, label='Old SS Value (EUR)', color='#762a83')
-#     rects5 = ax2.bar(x, plot_data['Total New SS Value [EUR]'], width, label='New SS Value (EUR)', color='#1b7837')
-#     rects6 = ax2.bar(x + width, plot_data['Value Difference SS - SS [EUR]'], width, label='Value Diff SS-SS (EUR)', color='#d73027')
-#
-#     ax2.set_ylabel('Value (EUR)')
-#     ax2.set_title('Safety Stock Value Comparison')
-#     ax2.set_xticks(x)
-#     ax2.set_xticklabels(labels)
-#     ax2.legend()
-#     ax2.grid(axis='y', linestyle='--', alpha=0.3)
-#     all_val2 = plot_data[['Total Old SS Value [EUR]', 'Total New SS Value [EUR]', 'Value Difference SS - SS [EUR]']]
-#     ax2.set_ylim(all_val2.min().min() * 1.2, all_val2.max().max() * 1.2)
-#     autolabel(rects4, ax2, is_value=True)
-#     autolabel(rects5, ax2, is_value=True)
-#     autolabel(rects6, ax2, is_value=True)
-#
-#     # --- PLOT 3: QUANTITIES (ROP vs SS) ---
-#     rects7 = ax3.bar(x - width, plot_data['Total Old SS (Qty)'], width, label='Old SS (Qty)', color='lightgrey')
-#     rects8 = ax3.bar(x, plot_data['Total Reorder Point (Qty)'], width, label='New ROP (Qty)', color='#a6cee3') # Different shade for ROP
-#     rects9 = ax3.bar(x + width, plot_data['Total ROP - SS Qty Diff'], width, label='Qty ROP-SS Diff', color='#fb9a99')
-#
-#     ax3.set_ylabel('Quantity (pcs)')
-#     ax3.set_title('ROP vs Current SS Comparison - Quantities')
-#     ax3.set_xticks(x)
-#     ax3.set_xticklabels(labels)
-#     ax3.legend()
-#     ax3.grid(axis='y', linestyle='--', alpha=0.3)
-#     all_qty3 = plot_data[['Total Old SS (Qty)', 'Total Reorder Point (Qty)', 'Total ROP - SS Qty Diff']]
-#     ax3.set_ylim(all_qty3.min().min() * 1.2, all_qty3.max().max() * 1.2)
-#     autolabel(rects7, ax3)
-#     autolabel(rects8, ax3)
-#     autolabel(rects9, ax3)
-#
-#     # --- PLOT 4: VALUES (ROP vs SS) ---
-#     rects10 = ax4.bar(x - width, plot_data['Total Old SS Value [EUR]'], width, label='Old SS Value (EUR)', color='#762a83')
-#     rects11 = ax4.bar(x, plot_data['Total ROP Value [EUR]'], width, label='Total ROP Value (EUR)', color='#33a02c')
-#     rects12 = ax4.bar(x + width, plot_data['Value Difference ROP - SS [EUR]'], width, label='Value Diff ROP-SS (EUR)', color='#e31a1c')
-#
-#     ax4.set_ylabel('Value (EUR)')
-#     ax4.set_title('ROP vs Current SS Value Comparison')
-#     ax4.set_xticks(x)
-#     ax4.set_xticklabels(labels)
-#     ax4.legend(loc='upper left')
-#     ax4.grid(axis='y', linestyle='--', alpha=0.3)
-#     all_val4 = plot_data[['Total Old SS Value [EUR]', 'Total ROP Value [EUR]', 'Value Difference ROP - SS [EUR]']]
-#     ax4.set_ylim(all_val4.min().min() * 1.2, all_val4.max().max() * 1.2)
-#     autolabel(rects10, ax4, is_value=True)
-#     autolabel(rects11, ax4, is_value=True)
-#     autolabel(rects12, ax4, is_value=True)
-#
-#     plt.tight_layout()
-#
-#     if save_path:
-#         plt.savefig(save_path, dpi=300)
-#
-#     # plt.show()
-#     plt.close(fig)
-#
-#     return fig
 
 def export_df_to_excel_file(df, file_path):
     df = df[[
