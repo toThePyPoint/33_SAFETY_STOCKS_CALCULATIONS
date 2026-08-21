@@ -48,7 +48,7 @@ def _set_padded_ylim(ax, data, padding=0.1, fallback_range=10):
     ax.set_ylim(y_min - padding * y_range, y_max + padding * y_range)
 
 
-def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_dates, start_date, end_date, k_parameter,
+def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path, prd_plant, get_all_dates, start_date, end_date, k_parameter,
                     ex_rates, std_mad_treshold, min_value_for_new_ss=0):
     # Mapping for mb51_df (Snake Case)
     mb51_rename = {
@@ -58,7 +58,8 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_d
         'Data księgowania': 'posting_date',
         'Ilość': 'quantity',
         'Podst. jedn. miary': 'base_uom',
-        'Rodzaj ruchu': 'movement_type'
+        'Rodzaj ruchu': 'movement_type',
+        'Klient': 'customer_number'
     }
 
     # Mapping for zsbe_df (Snake Case + Unit Price)
@@ -80,15 +81,20 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, prd_plant, get_all_d
         'Kontroler MRP': 'mrp_controller'
     }
 
-    mb51_df = pd.read_excel(mb51_path, dtype={'Materiał': str, 'Zakład': str})
+    mb51_df = pd.read_excel(mb51_path, dtype={'Materiał': str, 'Zakład': str, 'Klient': str})
     zsbe_df = pd.read_excel(zsbe_path, dtype={'Materiał': str, 'Zakład': str})
     no_ss_items_df = pd.read_excel(no_ss_items_path, dtype={'material': str})
+    no_ss_customers_df = pd.read_excel(no_ss_customers_path, dtype={'customer_number': str})
+    no_ss_customers_list = no_ss_customers_df['customer_number'].to_list()
     # Renaming
     mb51_df.rename(columns=mb51_rename, inplace=True)
     zsbe_df.rename(columns=zsbe_rename, inplace=True)
     # Drop confi items
     mb51_df = mb51_df[~mb51_df['material'].str.startswith('99')]
     zsbe_df = zsbe_df[~zsbe_df['material'].str.startswith('99')]
+
+    # Drop usage for customers for whom we don't supply within MTS strategy (due to special packing)
+    mb51_df = mb51_df[~mb51_df['customer_number'].isin(no_ss_customers_list)]
 
     # Prepare a unique list of materials and their types
     unique_materials = zsbe_df[zsbe_df['plant'] == prd_plant][['material', 'material_type']]
@@ -774,6 +780,7 @@ def create_many_product_groups_report(
         input_directory,
         product_groups,
         no_ss_items_path,
+        no_ss_customers_path,
         prd_plant,
         get_all_dates,
         start_date,
@@ -804,6 +811,7 @@ def create_many_product_groups_report(
             mb51_f_path,
             zsbe_f_path,
             no_ss_items_path,
+            no_ss_customers_path,
             prd_plant,
             get_all_dates,
             start_date,
