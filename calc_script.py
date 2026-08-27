@@ -17,6 +17,14 @@ DEFAULT_CHART_STYLE = {
     'grid_alpha': 0.3,
 }
 
+# plant: number of days
+TRANSPORTATION_TIMES = {
+    '0301': 2,
+    '1201': 3,
+    '3701': 3,
+    '2101': 0
+}
+
 
 def _get_chart_style(chart_style=None):
     style = DEFAULT_CHART_STYLE.copy()
@@ -176,6 +184,15 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     stats_df.reset_index(drop=True, inplace=True)
 
     lead_times = zsbe_df[['material', 'plant', 'planned_delivery_time', 'total_replenishment_time']].drop_duplicates()
+
+    # Stock items are produced within 3 days
+    lead_times['total_replenishment_time'] = 3
+
+    # Add transport times
+    lead_times['planned_delivery_time'] = (
+            lead_times['total_replenishment_time'] +
+            lead_times['plant'].map(TRANSPORTATION_TIMES).fillna(0)
+    )
 
     # Create the 'lead_time' column based on a condition
     lead_times['lead_time'] = np.where(
