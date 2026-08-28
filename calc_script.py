@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
+from itertools import product
 
 
 DEFAULT_CHART_STYLE = {
@@ -56,8 +57,27 @@ def _set_padded_ylim(ax, data, padding=0.1, fallback_range=10):
     ax.set_ylim(y_min - padding * y_range, y_max + padding * y_range)
 
 
-def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path, prd_plant, get_all_dates, start_date, end_date, k_parameter,
+def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path, prd_plant, get_all_dates, start_date, end_date, start_date_2, end_date_2, k_parameter,
                     ex_rates, std_mad_treshold, min_value_for_new_ss=0):
+    '''
+
+    :param mb51_path:
+    :param zsbe_path:
+    :param no_ss_items_path:
+    :param no_ss_customers_path:
+    :param prd_plant:
+    :param get_all_dates:
+    :param start_date:
+    :param end_date:
+    :param start_date_2: date for which we want to calculate average to support decision making (not included in statistics)
+    :param end_date_2: date for which we want to calculate average to support decision making (not included in statistics)
+    :param k_parameter:
+    :param ex_rates:
+    :param std_mad_treshold:
+    :param min_value_for_new_ss:
+    :return:
+    '''
+
     # Mapping for mb51_df (Snake Case)
     mb51_rename = {
         'Zakład': 'plant',
@@ -126,18 +146,24 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     else:
         all_dates = pd.date_range(start=start_date, end=end_date, freq='B')
 
+    all_dates_2 = pd.date_range(start=start_date_2, end=end_date_2, freq='B')
+
     # print("Dates for calculations", all_dates.sort_values())
 
     # Create the structure directly from pairs and dates
     # Create a list of tuples (material, plant, date)
-    from itertools import product
 
     structure = [
         (m, p, d) for (m, p), d in product(unique_pairs.values, all_dates)
     ]
 
+    structure_2 = [
+        (m, p, d) for (m, p), d in product(unique_pairs.values, all_dates_2)
+    ]
+
     # Convert to DataFrame
     full_frame = pd.DataFrame(structure, columns=['material', 'plant', 'posting_date'])
+    full_frame_2 = pd.DataFrame(structure_2, columns=['material', 'plant', 'posting_date'])
 
     # Aggregate MB51 to have one total per day/material/plant
     daily_actual = mb51_df.groupby(['material', 'plant', 'posting_date'])['quantity'].sum().reset_index()
@@ -150,12 +176,25 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
         how='left'
     ).fillna(0)
 
+    final_df_2 = pd.merge(
+        full_frame_2,
+        daily_actual,
+        on=['material', 'plant', 'posting_date'],
+        how='left'
+    ).fillna(0)
+
     # Group by material and plant to calculate statistics
     stats_df = final_df.groupby(['material', 'plant'])['quantity'].agg(
         daily_avg_consumption='mean',
         daily_std_dev='std',
         daily_mad=lambda x: np.mean(np.abs(x - np.mean(x)))
+    ).reset_index()    
+    
+    stats_df_2 = final_df_2.groupby(['material', 'plant'])['quantity'].agg(
+        daily_avg_cons_stats_only='mean',
     ).reset_index()
+
+    stats_df = pd.merge(stats_df, stats_df_2, on=['material', 'plant'], how='left')
 
     # Attach old safety stock for comparison
     old_ss = zsbe_df[['material', 'plant', 'safety_stock_in_SAP']]
@@ -176,6 +215,7 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
 
     # Optional: Round results to 2 decimal places for better readability
     stats_df['daily_avg_consumption'] = stats_df['daily_avg_consumption'].round(4)
+    stats_df['daily_avg_cons_stats_only'] = stats_df['daily_avg_cons_stats_only'].round(3)
     stats_df['daily_std_dev'] = stats_df['daily_std_dev'].round(4)
 
     # Check the result
@@ -655,7 +695,7 @@ def create_all_products_summary_plot_rop_to_ss_comparison(all_products_summary, 
 def export_df_to_excel_file(df, file_path):
     df = df[[
         'plant', 'material', 'material_description', 'lead_time',
-        'daily_avg_consumption', 'new_safety_stock', 'new_ss_range', 'reorder_point', 'safety_stock_in_SAP', 'ss_diff',
+        'daily_avg_consumption', 'daily_avg_cons_stats_only', 'new_safety_stock', 'new_ss_range', 'reorder_point', 'safety_stock_in_SAP', 'ss_diff',
         'rop_ss_diff', 'volatility_method', 'is_no_ss_item', 'is_below_min_ss', 'calculated_new_ss', 'calculated_new_ROP'
     ]]
 
@@ -720,6 +760,7 @@ def create_new_safety_stocks_df(stats_by_product_group):
         'material',
         'material_description',
         'daily_avg_consumption',
+        'daily_avg_cons_stats_only',
         'reorder_point',
         'new_safety_stock',
     ]
@@ -747,6 +788,7 @@ def create_safety_stocks_to_be_deleted_df(stats_by_product_group):
         'material',
         'material_description',
         'daily_avg_consumption',
+        'daily_avg_cons_stats_only',
         'reorder_point',
         'new_safety_stock',
         'safety_stock_in_SAP',
@@ -802,6 +844,8 @@ def create_many_product_groups_report(
         get_all_dates,
         start_date,
         end_date,
+        start_date_2,
+        end_date_2,
         k_parameter,
         ex_rates,
         std_mad_treshold,
@@ -833,6 +877,8 @@ def create_many_product_groups_report(
             get_all_dates,
             start_date,
             end_date,
+            start_date_2,
+            end_date_2,
             k_parameter,
             ex_rates,
             std_mad_treshold,
