@@ -57,8 +57,8 @@ def _set_padded_ylim(ax, data, padding=0.1, fallback_range=10):
     ax.set_ylim(y_min - padding * y_range, y_max + padding * y_range)
 
 
-def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path, prd_plant, get_all_dates, start_date, end_date, start_date_2, end_date_2, k_parameter,
-                    ex_rates, std_mad_treshold, min_value_for_new_ss=0):
+def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path, zlso_df, prd_plant, get_all_dates, start_date, end_date, start_date_2, end_date_2, k_parameter,
+                    ex_rates, std_mad_treshold, min_value_for_new_ss=0, dc_to_countries=None):
     '''
 
     :param mb51_path:
@@ -75,6 +75,7 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     :param ex_rates:
     :param std_mad_treshold:
     :param min_value_for_new_ss:
+    dc_to_countries: dictionary {plant: [list of countries where goods are shipped to from given plant]}
     :return:
     '''
 
@@ -108,6 +109,13 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
         'zapas bezpieczeństwa': 'safety_stock_in_SAP',
         'Kontroler MRP': 'mrp_controller'
     }
+
+    if not dc_to_countries:
+        dc_to_countries = {'2101': ['PL', 'HU'],
+                           '0301': ['DE', 'CH', 'AT', 'IT', 'NL'],
+                           '1201': ['FR'],
+                           '3701': ['CZ', 'SK'],
+                           }
 
     mb51_df = pd.read_excel(mb51_path, dtype={'Materiał': str, 'Zakład': str, 'Klient': str})
     zsbe_df = pd.read_excel(zsbe_path, dtype={'Materiał': str, 'Zakład': str})
@@ -323,6 +331,27 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
 
     stats_df['new_ss_range'] = stats_df['new_safety_stock'] / stats_df['daily_avg_consumption']
     stats_df['new_ss_range'] = stats_df['new_ss_range'].round(2)
+
+    # TODO: Add ZLSO data
+    # Function to evaluate if stock is required for a given row
+    def check_stock_needed(row):
+        plant = str(row['plant'])
+
+        # Return False if the delivery plant is not present in the dictionary
+        if plant not in dc_to_countries:
+            return np.nan
+
+        # Get the set of target countries for the given DC
+        allowed_countries = set(dc_to_countries[plant])
+
+        # Split the concatenated 'Land' string into individual country codes and strip whitespace
+        row_lands = set(land.strip() for land in str(row['Land']).split(',') if land.strip())
+
+        # Return True if there is at least one common country between the two sets
+        return bool(allowed_countries & row_lands)
+
+    stats_df = pd.merge(stats_df, zlso_df, on='material', how='left')
+    stats_df['is_dc_market_match'] = stats_df.apply(check_stock_needed, axis=1)
 
     return stats_df
 
@@ -696,7 +725,8 @@ def export_df_to_excel_file(df, file_path):
     df = df[[
         'plant', 'material', 'material_description', 'lead_time',
         'daily_avg_consumption', 'daily_avg_cons_stats_only', 'new_safety_stock', 'new_ss_range', 'reorder_point', 'safety_stock_in_SAP', 'ss_diff',
-        'rop_ss_diff', 'volatility_method', 'is_no_ss_item', 'is_below_min_ss', 'calculated_new_ss', 'calculated_new_ROP'
+        'rop_ss_diff', 'volatility_method', 'is_no_ss_item', 'is_below_min_ss', 'calculated_new_ss', 'calculated_new_ROP',
+        'Land_LT', 'MaxLT', 'is_dc_market_match'
     ]]
 
     df.to_excel(file_path, index=False)
@@ -763,6 +793,9 @@ def create_new_safety_stocks_df(stats_by_product_group):
         'daily_avg_cons_stats_only',
         'reorder_point',
         'new_safety_stock',
+        'Land_LT',
+        'MaxLT',
+        'is_dc_market_match'
     ]
     new_safety_stocks = []
 
@@ -792,7 +825,10 @@ def create_safety_stocks_to_be_deleted_df(stats_by_product_group):
         'reorder_point',
         'new_safety_stock',
         'safety_stock_in_SAP',
-        'old_ss_value'
+        'old_ss_value',
+        'Land_LT',
+        'MaxLT',
+        'is_dc_market_match'
     ]
     safety_stocks_to_be_deleted = []
 
@@ -840,6 +876,7 @@ def create_many_product_groups_report(
         product_groups,
         no_ss_items_path,
         no_ss_customers_path,
+        zlso_path,
         prd_plant,
         get_all_dates,
         start_date,
@@ -856,7 +893,8 @@ def create_many_product_groups_report(
         display_output=True,
         show_group_charts=True,
         show_final_charts=True,
-        chart_style=None
+        chart_style=None,
+        dc_to_countries_dict=None
 ):
     all_files = get_input_files(input_directory, product_groups)
     product_summary_rows = []
@@ -864,6 +902,23 @@ def create_many_product_groups_report(
     stats_by_product_group = {}
     plant_summary_by_product_group = {}
     group_figures = {}
+
+    # TODO: Retrive ZLSO table
+    zlso_df = pd.read_excel(zlso_path, sheet_name='Abf_ZLSO_Aktuell',
+                            usecols=['Mat', 'Materialkurztext', 'Land', 'Handbuchlieferzeit'], dtype={'Mat': str})
+
+    zlso_df = zlso_df.rename(columns={'Mat': 'material'})
+
+    zlso_df['Land_LT_temp'] = (
+            zlso_df['Land'].fillna('').astype(str) + " : " + zlso_df['Handbuchlieferzeit'].fillna('').astype(str)
+    )
+
+    zlso_df = zlso_df.groupby('material').agg(
+        Land=('Land', lambda x: ', '.join(x.dropna().astype(str))),
+        # PriceListLT=('Handbuchlieferzeit', lambda x: ', '.join(x.dropna().astype(str))),
+        Land_LT=('Land_LT_temp', lambda x: ', '.join(x[x != " : "])),
+        MaxLT=('Handbuchlieferzeit', 'max')
+    ).reset_index()
 
     for product_group, (mb51_f_path, zsbe_f_path) in all_files.items():
         _display_report_header(display_output, f'## Calculating: {product_group}')
@@ -873,6 +928,7 @@ def create_many_product_groups_report(
             zsbe_f_path,
             no_ss_items_path,
             no_ss_customers_path,
+            zlso_df,
             prd_plant,
             get_all_dates,
             start_date,
@@ -882,7 +938,8 @@ def create_many_product_groups_report(
             k_parameter,
             ex_rates,
             std_mad_treshold,
-            min_value_for_new_ss
+            min_value_for_new_ss,
+            dc_to_countries_dict
         )
         plant_summary = create_plant_summary(stats_df)
 
