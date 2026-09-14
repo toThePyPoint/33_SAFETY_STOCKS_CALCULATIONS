@@ -350,7 +350,7 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
         # Return True if there is at least one common country between the two sets
         return bool(allowed_countries & row_lands)
 
-    stats_df = pd.merge(stats_df, zlso_df, on='material', how='left')
+    stats_df = pd.merge(stats_df, zlso_df, on=['material', 'plant'], how='left')
     stats_df['is_dc_market_match'] = stats_df.apply(check_stock_needed, axis=1)
 
     return stats_df
@@ -957,7 +957,17 @@ def create_many_product_groups_report(
             zlso_df['Land'].fillna('').astype(str) + " : " + zlso_df['price_list_delivery_time'].fillna('').astype(str)
     )
 
-    zlso_df = zlso_df.groupby('material').agg(
+    # Reverse the dictionary to map 'Land' (Country) -> 'plant'
+    country_to_DC = {
+        country: plant
+        for plant, countries in dc_to_countries_dict.items()
+        for country in countries
+    }
+
+    # Map the 'Land' column to create the new 'plant' column
+    zlso_df['plant'] = zlso_df['Land'].map(country_to_DC)
+
+    zlso_df = zlso_df.groupby(['material', 'plant']).agg(
         Land=('Land', lambda x: ', '.join(x.dropna().astype(str))),
         # PriceListLT=('price_list_delivery_time', lambda x: ', '.join(x.dropna().astype(str))),
         Land_LT=('Land_LT_temp', lambda x: ', '.join(x[x != " : "])),
