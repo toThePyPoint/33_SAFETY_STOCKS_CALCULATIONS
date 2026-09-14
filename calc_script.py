@@ -726,7 +726,7 @@ def export_df_to_excel_file(df, file_path):
         'plant', 'material', 'material_description', 'lead_time',
         'daily_avg_consumption', 'daily_avg_cons_stats_only', 'new_safety_stock', 'new_ss_range', 'reorder_point', 'safety_stock_in_SAP', 'ss_diff',
         'rop_ss_diff', 'volatility_method', 'is_no_ss_item', 'is_below_min_ss', 'calculated_new_ss', 'calculated_new_ROP',
-        'Land_LT', 'MaxLT', 'is_dc_market_match'
+        'Land_LT', 'MinLT', 'is_dc_market_match'
     ]]
 
     df.to_excel(file_path, index=False)
@@ -741,6 +741,43 @@ def get_input_files(directory, prd_groups):
         )
         for prd_group in prd_groups
     }
+
+
+def merge_zlso_df_with_article_master_data_files(article_master_data_file_information, zlso_df):
+    # 1. Collect data from all markets into a single list
+    master_data_list = []
+
+    for market, params in article_master_data_file_information.items():
+        df_temp = pd.read_excel(
+            params['path'],
+            sheet_name=params['sheet_name'],
+            usecols=[params['mat_col'], params['lieferzeit_col']],
+            dtype={params['mat_col']: str}
+        )
+        df_temp['Land'] = market
+        df_temp = df_temp.rename(columns={
+            params['mat_col']: 'material',
+            params['lieferzeit_col']: 'Lieferzeit'
+        })
+        master_data_list.append(df_temp)
+
+    # 2. Combine all files into a single master data DataFrame
+    combined_master_data = pd.concat(master_data_list, ignore_index=True)
+
+    # 3. Perform a single merge with the main DataFrame
+    zlso_new_dt_df = zlso_df.merge(combined_master_data, how='left', on=['material', 'Land'])
+
+    # Set Lieferzeit = 99 for items for which lead time wasn't defined in article master data file
+    mask = (
+            zlso_new_dt_df['Land'].isin(article_master_data_file_information.keys())
+            & zlso_new_dt_df['Lieferzeit'].isna()
+    )
+    zlso_new_dt_df.loc[mask, 'Lieferzeit'] = 99
+
+    # Fill NaN values with 0 - these are rows for markets for which article master data files weren't available
+    zlso_new_dt_df['Lieferzeit'] = zlso_new_dt_df['Lieferzeit'].fillna(0).astype(int)
+
+    return zlso_new_dt_df
 
 
 def create_product_group_summary_row(plant_summary, product_group):
@@ -794,7 +831,7 @@ def create_new_safety_stocks_df(stats_by_product_group):
         'reorder_point',
         'new_safety_stock',
         'Land_LT',
-        'MaxLT',
+        'MinLT',
         'is_dc_market_match'
     ]
     new_safety_stocks = []
@@ -827,7 +864,7 @@ def create_safety_stocks_to_be_deleted_df(stats_by_product_group):
         'safety_stock_in_SAP',
         'old_ss_value',
         'Land_LT',
-        'MaxLT',
+        'MinLT',
         'is_dc_market_match'
     ]
     safety_stocks_to_be_deleted = []
@@ -894,7 +931,8 @@ def create_many_product_groups_report(
         show_group_charts=True,
         show_final_charts=True,
         chart_style=None,
-        dc_to_countries_dict=None
+        dc_to_countries_dict=None,
+        md_file_dict = None
 ):
     all_files = get_input_files(input_directory, product_groups)
     product_summary_rows = []
@@ -903,21 +941,27 @@ def create_many_product_groups_report(
     plant_summary_by_product_group = {}
     group_figures = {}
 
-    # TODO: Retrive ZLSO table
+    # TODO: Retrieve ZLSO table
     zlso_df = pd.read_excel(zlso_path, sheet_name='Abf_ZLSO_Aktuell',
-                            usecols=['Mat', 'Materialkurztext', 'Land', 'Handbuchlieferzeit'], dtype={'Mat': str})
+                            usecols=['Mat', 'Materialkurztext', 'Land'], dtype={'Mat': str})
 
     zlso_df = zlso_df.rename(columns={'Mat': 'material'})
 
+    # TODO: Retrieve Article Master Data Files
+    zlso_df = merge_zlso_df_with_article_master_data_files(article_master_data_file_information=md_file_dict,
+                                                           zlso_df=zlso_df)
+
+    zlso_df = zlso_df.rename(columns={'Lieferzeit': 'price_list_delivery_time'})
+
     zlso_df['Land_LT_temp'] = (
-            zlso_df['Land'].fillna('').astype(str) + " : " + zlso_df['Handbuchlieferzeit'].fillna('').astype(str)
+            zlso_df['Land'].fillna('').astype(str) + " : " + zlso_df['price_list_delivery_time'].fillna('').astype(str)
     )
 
     zlso_df = zlso_df.groupby('material').agg(
         Land=('Land', lambda x: ', '.join(x.dropna().astype(str))),
-        # PriceListLT=('Handbuchlieferzeit', lambda x: ', '.join(x.dropna().astype(str))),
+        # PriceListLT=('price_list_delivery_time', lambda x: ', '.join(x.dropna().astype(str))),
         Land_LT=('Land_LT_temp', lambda x: ', '.join(x[x != " : "])),
-        MaxLT=('Handbuchlieferzeit', 'max')
+        MinLT=('price_list_delivery_time', 'min')
     ).reset_index()
 
     for product_group, (mb51_f_path, zsbe_f_path) in all_files.items():
