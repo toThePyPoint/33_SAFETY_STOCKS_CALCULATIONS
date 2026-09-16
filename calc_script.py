@@ -743,7 +743,7 @@ def get_input_files(directory, prd_groups):
     }
 
 
-def merge_zlso_df_with_article_master_data_files(article_master_data_file_information, zlso_df):
+def merge_zlso_df_with_article_master_data_files(article_master_data_file_information, zlso_df, fast_movers_lt):
     # 1. Collect data from all markets into a single list
     master_data_list = []
 
@@ -774,8 +774,8 @@ def merge_zlso_df_with_article_master_data_files(article_master_data_file_inform
     )
     zlso_new_dt_df.loc[mask, 'Lieferzeit'] = 99
 
-    # Fill NaN values with 0 - these are rows for markets for which article master data files weren't available
-    zlso_new_dt_df['Lieferzeit'] = zlso_new_dt_df['Lieferzeit'].fillna(0).astype(int)
+    # Fill NaN values with lead time for fast movers - these are rows for markets for which article master data files weren't available
+    zlso_new_dt_df['Lieferzeit'] = zlso_new_dt_df['Lieferzeit'].fillna(fast_movers_lt).astype(int)
 
     return zlso_new_dt_df
 
@@ -932,7 +932,8 @@ def create_many_product_groups_report(
         show_final_charts=True,
         chart_style=None,
         dc_to_countries_dict=None,
-        md_file_dict = None
+        md_file_dict = None,
+        fast_movers_lt = 0
 ):
     all_files = get_input_files(input_directory, product_groups)
     product_summary_rows = []
@@ -949,7 +950,7 @@ def create_many_product_groups_report(
 
     # TODO: Retrieve Article Master Data Files
     zlso_df = merge_zlso_df_with_article_master_data_files(article_master_data_file_information=md_file_dict,
-                                                           zlso_df=zlso_df)
+                                                           zlso_df=zlso_df, fast_movers_lt=fast_movers_lt)
 
     zlso_df = zlso_df.rename(columns={'Lieferzeit': 'price_list_delivery_time'})
 
