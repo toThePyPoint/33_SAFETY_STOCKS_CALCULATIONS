@@ -292,6 +292,15 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     )
     stats_df.loc[small_new_ss_mask, ['new_safety_stock', 'reorder_point', 'is_below_min_ss']] = [0, 0, True]
 
+    # TODO: Implement minimum stocks adjustment
+    small_existing_ss_mask = (
+            (stats_df['new_safety_stock'] < min_value_for_new_ss) &
+            (stats_df['new_safety_stock'] > 0) &
+            (stats_df['safety_stock_in_SAP'] > 0)
+    )
+    stats_df.loc[small_existing_ss_mask, ['new_safety_stock', 'reorder_point', 'is_below_min_ss']] = \
+        [min_value_for_new_ss, min_value_for_new_ss, True]
+
     # For matching rows, update the stock parameters to zero and set the flag to True
     stats_df.loc[mask, ['new_safety_stock', 'reorder_point', 'is_no_ss_item']] = [0, 0, True]
 
@@ -332,7 +341,7 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     stats_df['new_ss_range'] = stats_df['new_safety_stock'] / stats_df['daily_avg_consumption']
     stats_df['new_ss_range'] = stats_df['new_ss_range'].round(2)
 
-    # TODO: Add ZLSO data
+    # Add ZLSO data
     # Function to evaluate if stock is required for a given row
     def check_stock_needed(row):
         plant = str(row['plant'])
@@ -352,6 +361,20 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
 
     stats_df = pd.merge(stats_df, zlso_df, on=['material', 'plant'], how='left')
     stats_df['is_dc_market_match'] = stats_df.apply(check_stock_needed, axis=1)
+
+    stats_df['manual_check'] = ""
+    manual_check_mask = (
+            (stats_df['reorder_point'] > 0) &
+            (~stats_df['is_dc_market_match'])
+    )
+    stats_df.loc[manual_check_mask, ['manual_check']] = "Not needed at any market."
+
+    manual_check_mask = (
+            (stats_df['reorder_point'] > 0) &
+            (stats_df['is_below_min_ss']) &
+            (stats_df['MinLT'] >= 8)
+    )
+    stats_df.loc[manual_check_mask, ['manual_check']] = "Low SS for item with high LT."
 
     return stats_df
 
@@ -726,7 +749,7 @@ def export_df_to_excel_file(df, file_path):
         'plant', 'material', 'material_description', 'lead_time',
         'daily_avg_consumption', 'daily_avg_cons_stats_only', 'new_safety_stock', 'new_ss_range', 'reorder_point', 'safety_stock_in_SAP', 'ss_diff',
         'rop_ss_diff', 'volatility_method', 'is_no_ss_item', 'is_below_min_ss', 'calculated_new_ss', 'calculated_new_ROP',
-        'Land_LT', 'MinLT', 'is_dc_market_match'
+        'Land_LT', 'MinLT', 'is_dc_market_match', 'manual_check'
     ]]
 
     df.to_excel(file_path, index=False)
@@ -942,13 +965,13 @@ def create_many_product_groups_report(
     plant_summary_by_product_group = {}
     group_figures = {}
 
-    # TODO: Retrieve ZLSO table
+    # Retrieve ZLSO table
     zlso_df = pd.read_excel(zlso_path, sheet_name='Abf_ZLSO_Aktuell',
                             usecols=['Mat', 'Materialkurztext', 'Land'], dtype={'Mat': str})
 
     zlso_df = zlso_df.rename(columns={'Mat': 'material'})
 
-    # TODO: Retrieve Article Master Data Files
+    # Retrieve Article Master Data Files
     zlso_df = merge_zlso_df_with_article_master_data_files(article_master_data_file_information=md_file_dict,
                                                            zlso_df=zlso_df, fast_movers_lt=fast_movers_lt)
 
