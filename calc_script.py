@@ -292,7 +292,7 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     )
     stats_df.loc[small_new_ss_mask, ['new_safety_stock', 'reorder_point', 'is_below_min_ss']] = [0, 0, True]
 
-    # TODO: Implement minimum stocks adjustment
+    # Implement minimum stocks adjustment
     small_existing_ss_mask = (
             (stats_df['new_safety_stock'] < min_value_for_new_ss) &
             (stats_df['new_safety_stock'] > 0) &
