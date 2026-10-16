@@ -940,7 +940,8 @@ def create_safety_stocks_to_be_deleted_df(stats_by_product_group):
         'Land_LT',
         'MinLT',
         'is_dc_market_match',
-        'zero_streak'
+        'zero_streak',
+        'calculated_new_ROP'
     ]
     safety_stocks_to_be_deleted = []
 
