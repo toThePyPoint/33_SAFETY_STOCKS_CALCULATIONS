@@ -218,3 +218,5 @@ __marimo__/
 .streamlit/secrets.toml
 
 calculations.ipynb
+ss_report_many_product_groups_test.ipynb
+streak_test.xlsx

@@ -57,8 +57,46 @@ def _set_padded_ylim(ax, data, padding=0.1, fallback_range=10):
     ax.set_ylim(y_min - padding * y_range, y_max + padding * y_range)
 
 
+
+def check_for_zero_streaks(df, streak_length):
+    """
+    Identifies material-plant pairs with at least a specified number
+    of consecutive records where consumption equals zero.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing material, plant,
+            posting_date, and quantity columns.
+        streak_length (int): Minimum number of consecutive zero-quantity
+            records required to identify a streak.
+
+    Returns:
+        pd.DataFrame: DataFrame containing unique material-plant pairs
+            that meet the zero-streak condition.
+    """
+    # Sort the data
+    df = df.sort_values(["material", "plant", "posting_date"])
+
+    # Flag records with zero consumption
+    df["is_zero"] = df["quantity"].eq(0)
+
+    # Check whether a streak of consecutive zeros exists
+    df["zero_streak"] = (
+        df.groupby(["material", "plant"])["is_zero"]
+        .transform(lambda s: s.rolling(streak_length).sum().eq(streak_length))
+    )
+
+    # Get unique material-plant pairs
+    result = (
+        df.loc[df["zero_streak"], ["material", "plant", "zero_streak"]]
+        .drop_duplicates()
+        .reset_index(drop=True)
+    )
+
+    return result
+
+
 def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path, zlso_df, prd_plant, get_all_dates, start_date, end_date, start_date_2, end_date_2, k_parameter,
-                    ex_rates, std_mad_treshold, min_value_for_new_ss=0, dc_to_countries=None):
+                    ex_rates, std_mad_treshold, min_value_for_new_ss=0, dc_to_countries=None, trend_coefficient=1, zero_streak_length=20):
     '''
 
     :param mb51_path:
@@ -75,7 +113,10 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     :param ex_rates:
     :param std_mad_treshold:
     :param min_value_for_new_ss:
-    dc_to_countries: dictionary {plant: [list of countries where goods are shipped to from given plant]}
+    :param dc_to_countries: dictionary {plant: [list of countries where goods are shipped to from given plant]}
+    :param trend_coefficient: how the coming season (for which ss are calculated) is expected to be in comparison to previous season (source of consumption figures)
+    :param zero_streak_length: Minimum number of consecutive zero-quantity
+            records required to identify a streak.
     :return:
     '''
 
@@ -176,6 +217,10 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     # Aggregate MB51 to have one total per day/material/plant
     daily_actual = mb51_df.groupby(['material', 'plant', 'posting_date'])['quantity'].sum().reset_index()
 
+    print(f"Multiplying by trend coefficient: {trend_coefficient}")
+    # TODO: here multiply by trend_coefficient
+    daily_actual['quantity'] = daily_actual['quantity'] * trend_coefficient
+
     # Merge
     final_df = pd.merge(
         full_frame,
@@ -183,6 +228,8 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
         on=['material', 'plant', 'posting_date'],
         how='left'
     ).fillna(0)
+
+    zero_streaks = check_for_zero_streaks(final_df, zero_streak_length)
 
     final_df_2 = pd.merge(
         full_frame_2,
@@ -303,6 +350,10 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
 
     # For matching rows, update the stock parameters to zero and set the flag to True
     stats_df.loc[mask, ['new_safety_stock', 'reorder_point', 'is_no_ss_item']] = [0, 0, True]
+
+    stats_df = pd.merge(stats_df, zero_streaks, on=['material', 'plant'], how='left')
+    streak_mask = stats_df['zero_streak'] == True
+    stats_df.loc[streak_mask, ['new_safety_stock', 'reorder_point']] = [0, 0]
 
     # Create a new column with converted price
     # .map() matches the currency to the exchange rate, then we multiply it by the unit price
@@ -749,7 +800,7 @@ def export_df_to_excel_file(df, file_path):
         'plant', 'material', 'material_description', 'lead_time',
         'daily_avg_consumption', 'daily_avg_cons_stats_only', 'new_safety_stock', 'new_ss_range', 'reorder_point', 'safety_stock_in_SAP', 'ss_diff',
         'rop_ss_diff', 'volatility_method', 'is_no_ss_item', 'is_below_min_ss', 'calculated_new_ss', 'calculated_new_ROP',
-        'Land_LT', 'MinLT', 'is_dc_market_match', 'manual_check'
+        'Land_LT', 'MinLT', 'is_dc_market_match', 'zero_streak', 'manual_check'
     ]]
 
     df.to_excel(file_path, index=False)
@@ -888,7 +939,8 @@ def create_safety_stocks_to_be_deleted_df(stats_by_product_group):
         'old_ss_value',
         'Land_LT',
         'MinLT',
-        'is_dc_market_match'
+        'is_dc_market_match',
+        'zero_streak'
     ]
     safety_stocks_to_be_deleted = []
 
@@ -956,7 +1008,9 @@ def create_many_product_groups_report(
         chart_style=None,
         dc_to_countries_dict=None,
         md_file_dict = None,
-        fast_movers_lt = 0
+        fast_movers_lt = 0,
+        trend_coefficients = None,
+        streak_length = 20
 ):
     all_files = get_input_files(input_directory, product_groups)
     product_summary_rows = []
@@ -1017,7 +1071,9 @@ def create_many_product_groups_report(
             ex_rates,
             std_mad_treshold,
             min_value_for_new_ss,
-            dc_to_countries_dict
+            dc_to_countries_dict,
+            trend_coefficients[product_group],
+            streak_length
         )
         plant_summary = create_plant_summary(stats_df)
 
