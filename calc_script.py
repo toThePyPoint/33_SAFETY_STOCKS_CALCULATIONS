@@ -3,33 +3,13 @@ import numpy as np
 from pathlib import Path
 from itertools import product
 
-from helper_functions import check_for_zero_streaks
+from helper_functions import check_for_zero_streaks, check_top_customers
 from plots import create_a_summary_plot_rop_to_ss_comparison, create_all_products_summary_plot_rop_to_ss_comparison
 from report_display_functions import _display_report_header, _display_report_item
-
-DEFAULT_CHART_STYLE = {
-    'title_fontsize': 11,
-    'title_fontweight': 'normal',
-    'axis_label_fontsize': 11,
-    'tick_label_fontsize': 11,
-    'legend_fontsize': 7,
-    'bar_label_fontsize': 8,
-    'bar_label_fontweight': 'bold',
-    'x_tick_rotation': 0,
-    'x_tick_ha': 'center',
-    'grid_alpha': 0.3,
-}
-
-# plant: number of days
-TRANSPORTATION_TIMES = {
-    '0301': 2,
-    '1201': 3,
-    '3701': 3,
-    '2101': 0
-}
+from maps import TRANSPORTATION_TIMES
 
 
-def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path, zlso_df, prd_plant, get_all_dates, start_date, end_date, start_date_2, end_date_2, k_parameter,
+def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path, zlso_df, customers_df, prd_plant, get_all_dates, start_date, end_date, start_date_2, end_date_2, k_parameter,
                     ex_rates, std_mad_treshold, min_value_for_new_ss=0, dc_to_countries=None, trend_coefficient=1, zero_streak_length=20):
     '''
 
@@ -97,6 +77,7 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     no_ss_items_df = pd.read_excel(no_ss_items_path, dtype={'material': str})
     no_ss_customers_df = pd.read_excel(no_ss_customers_path, dtype={'customer_number': str})
     no_ss_customers_list = no_ss_customers_df['customer_number'].to_list()
+
     # Renaming
     mb51_df.rename(columns=mb51_rename, inplace=True)
     zsbe_df.rename(columns=zsbe_rename, inplace=True)
@@ -121,7 +102,7 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     mb51_df['quantity'] = mb51_df['quantity'].abs()
 
     # TODO: implement Top customer functionality
-
+    top_customers = check_top_customers(mb51_df, customers_df, start_date, end_date)
 
     # Get unique Material-Plant pairs
     unique_pairs = zsbe_df[['material', 'plant']].drop_duplicates()
@@ -259,6 +240,9 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     # Round up
     stats_df['reorder_point'] = np.ceil(stats_df['reorder_point']).astype(int)
 
+    # TODO: implement Top customer functionality
+    stats_df = stats_df.merge(top_customers, on=['material', 'plant'], how='left')
+
     # Create a boolean mask for materials present in the exclusion list
     mask = stats_df['material'].isin(no_ss_items_df['material'])
 
@@ -351,18 +335,46 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     stats_df['is_dc_market_match'] = stats_df.apply(check_stock_needed, axis=1)
 
     stats_df['manual_check'] = ""
-    manual_check_mask = (
+    # --- First Condition ---
+    mask1 = (
             (stats_df['reorder_point'] > 0) &
             (~stats_df['is_dc_market_match'])
     )
-    stats_df.loc[manual_check_mask, ['manual_check']] = "Not needed at any market."
+    comment1 = "Not needed at any market."
 
-    manual_check_mask = (
+    stats_df.loc[mask1, 'manual_check'] = np.where(
+        stats_df.loc[mask1, 'manual_check'] == "",
+        comment1,
+        stats_df.loc[mask1, 'manual_check'] + "; " + comment1
+    )
+
+    # --- Second condition ---
+    mask2 = (
             (stats_df['reorder_point'] > 0) &
             (stats_df['is_below_min_ss']) &
             (stats_df['MinLT'] >= 8)
     )
-    stats_df.loc[manual_check_mask, ['manual_check']] = "Low SS for item with high LT."
+    comment2 = "Low SS for item with high LT."
+
+    stats_df.loc[mask2, 'manual_check'] = np.where(
+        stats_df.loc[mask2, 'manual_check'] == "",
+        comment2,
+        stats_df.loc[mask2, 'manual_check'] + "; " + comment2
+    )
+
+    # --- Third condition ---
+    one_customer_concentration_threshold = 80
+    mask3 = (
+            (stats_df['reorder_point'] > 0) &
+            (stats_df['top_customer_pct'] >= one_customer_concentration_threshold)
+    )
+    comment3 = f"Sales highly concentrated on one customer ({one_customer_concentration_threshold}%)."
+
+    stats_df.loc[mask3, 'manual_check'] = np.where(
+        stats_df.loc[mask3, 'manual_check'] == "",
+        comment3,
+        stats_df.loc[mask3, 'manual_check'] + "; " + comment3
+    )
 
     return stats_df
 
@@ -419,7 +431,8 @@ def export_df_to_excel_file(df, file_path):
         'plant', 'material', 'material_description', 'lead_time',
         'daily_avg_consumption', 'daily_avg_cons_stats_only', 'new_safety_stock', 'new_ss_range', 'reorder_point', 'safety_stock_in_SAP', 'ss_diff',
         'rop_ss_diff', 'volatility_method', 'is_no_ss_item', 'is_below_min_ss', 'calculated_new_ss', 'calculated_new_ROP',
-        'Land_LT', 'MinLT', 'is_dc_market_match', 'zero_streak', 'manual_check'
+        'Land_LT', 'MinLT', 'is_dc_market_match', 'zero_streak', 'manual_check', "top_customer", "top_customer_name",
+        "top_customer_qty", "top_customer_pct", "n_customers"
     ]]
 
     df.to_excel(file_path, index=False)
@@ -525,7 +538,13 @@ def create_new_safety_stocks_df(stats_by_product_group):
         'new_safety_stock',
         'Land_LT',
         'MinLT',
-        'is_dc_market_match'
+        'is_dc_market_match',
+        "zero_streak",
+        "top_customer",
+        "top_customer_name",
+        "top_customer_qty",
+        "top_customer_pct",
+        "n_customers"
     ]
     new_safety_stocks = []
 
@@ -560,7 +579,12 @@ def create_safety_stocks_to_be_deleted_df(stats_by_product_group):
         'MinLT',
         'is_dc_market_match',
         'zero_streak',
-        'calculated_new_ROP'
+        'calculated_new_ROP',
+        "top_customer",
+        "top_customer_name",
+        "top_customer_qty",
+        "top_customer_pct",
+        "n_customers"
     ]
     safety_stocks_to_be_deleted = []
 
@@ -585,6 +609,7 @@ def create_many_product_groups_report(
         no_ss_items_path,
         no_ss_customers_path,
         zlso_path,
+        customers_table_path,
         prd_plant,
         get_all_dates,
         start_date,
@@ -648,6 +673,8 @@ def create_many_product_groups_report(
         MinLT=('price_list_delivery_time', 'min')
     ).reset_index()
 
+    customers_df = pd.read_excel(customers_table_path, dtype={'KUNNR': str})
+
     for product_group, (mb51_f_path, zsbe_f_path) in all_files.items():
         _display_report_header(display_output, f'## Calculating: {product_group}')
 
@@ -657,6 +684,7 @@ def create_many_product_groups_report(
             no_ss_items_path,
             no_ss_customers_path,
             zlso_df,
+            customers_df,
             prd_plant,
             get_all_dates,
             start_date,

@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from calc_script import DEFAULT_CHART_STYLE
+from maps import DEFAULT_CHART_STYLE
 
 
 def _get_chart_style(chart_style=None):
