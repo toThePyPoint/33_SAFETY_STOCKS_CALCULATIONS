@@ -14,14 +14,21 @@ def get_ss_changes_records(
     sap_system="K11",
     date_from="20230101",
 ):
-    result_columns = [
-        "MATNR",
-        "WERKS",
-        "UDATE",
-        "UTIME",
-        "VALUE_OLD",
-        "VALUE_NEW",
-    ]
+
+    if stocks_deleted_flag:
+        change_date_col_name = "ss_last_deletion"
+        result_columns = [
+            "material",
+            "plant",
+            change_date_col_name,
+        ]
+    else:
+        change_date_col_name = "ss_last_creation"
+        result_columns = [
+            "material",
+            "plant",
+            change_date_col_name,
+        ]
 
     materials_sap = [str(mat).zfill(18) for mat in materials_list]
     if not materials_sap:
@@ -193,8 +200,8 @@ def get_ss_changes_records(
     )
 
     # df_result["MANDT"] = df_result["TABKEY"].str[:3]
-    df_result["MATNR"] = df_result["TABKEY"].str[3:21].str.lstrip("0")
-    df_result["WERKS"] = df_result["TABKEY"].str[21:25]
+    df_result["material"] = df_result["TABKEY"].str[3:21].str.lstrip("0")
+    df_result["plant"] = df_result["TABKEY"].str[21:25]
 
     df_result["UDATE"] = pd.to_datetime(
         df_result["UDATE"].str.strip(),
@@ -219,8 +226,9 @@ def get_ss_changes_records(
 
     df_ss_change = (
         df_result[mask]
-        .sort_values(["MATNR", "WERKS", "UDATE", "UTIME"], ascending=[True, True, False, False])
-        .drop_duplicates(["MATNR", "WERKS"], keep="first")
+        .sort_values(["material", "plant", "UDATE", "UTIME"], ascending=[True, True, False, False])
+        .rename(columns={'UDATE': change_date_col_name})
+        .drop_duplicates(["material", "plant"], keep="first")
         .copy()
     )
 
