@@ -1,9 +1,10 @@
 import pandas as pd
 from sap_conn import get_conn
 from sap_rtab import rfc_read_table
+import time
 
 
-def chunks(values, size=30):
+def chunks(values, size=3000):
     for i in range(0, len(values), size):
         yield values[i:i + size]
 
@@ -214,7 +215,7 @@ def get_material_data(
         # ----------------------------------------------------------
         # MARC - plant-specific material data / safety stock
         # ----------------------------------------------------------
-        for materials_batch in chunks(materials_sap, size=30):
+        for materials_batch in chunks(materials_sap, size=2000):
 
             materials_sql = "', '".join(materials_batch)
 
@@ -237,7 +238,7 @@ def get_material_data(
         # ----------------------------------------------------------
         # MARA - general material master / material type
         # ----------------------------------------------------------
-        for materials_batch in chunks(materials_sap, size=30):
+        for materials_batch in chunks(materials_sap, size=2000):
 
             materials_sql = "', '".join(materials_batch)
 
@@ -259,7 +260,7 @@ def get_material_data(
         # MBEW - material valuation / price
         # Assumption: valuation area (BWKEY) = plant.
         # ----------------------------------------------------------
-        for materials_batch in chunks(materials_sap, size=30):
+        for materials_batch in chunks(materials_sap, size=2000):
 
             materials_sql = "', '".join(materials_batch)
 
@@ -286,7 +287,7 @@ def get_material_data(
         # ----------------------------------------------------------
         # MAKT - material descriptions
         # ----------------------------------------------------------
-        for materials_batch in chunks(materials_sap, size=30):
+        for materials_batch in chunks(materials_sap, size=2000):
             materials_sql = "', '".join(materials_batch)
 
             rows = rfc_read_table(
@@ -445,3 +446,304 @@ def get_material_data(
         .dropna(subset=["unit_price"])
         .reset_index(drop=True)
     )
+
+
+import time
+import pandas as pd
+
+
+def get_material_movements(
+    materials_list,
+    plants,
+    movement_types,
+    date_from,
+    date_to,
+    sap_system="K11",
+    document_chunk_size=2000,
+    material_chunk_size=2000,
+):
+    """
+    Retrieve material movements for selected materials, plants, movement
+    types, and posting date range from SAP.
+
+    Header data, including the posting date, is retrieved from MKPF.
+    Material document items are retrieved from MSEG. The tables are linked
+    using the material document number (MBLNR) and document year (MJAHR).
+
+    Parameters
+    ----------
+    materials_list : list
+        List of SAP material numbers. Material numbers may be provided
+        with or without leading zeros.
+
+    plants : list
+        List of SAP plant codes, e.g. ["2101", "0301", "3701", "1201"].
+
+    movement_types : list
+        List of SAP movement types, e.g. ["261", "262", "601", "602"].
+
+    date_from : str
+        Start of the posting date range in YYYYMMDD format.
+
+    date_to : str
+        End of the posting date range in YYYYMMDD format.
+
+    sap_system : str, optional
+        SAP system used for the RFC connection.
+        Default is "K11".
+
+    document_chunk_size : int, optional
+        Number of material documents processed per MSEG query.
+        Default is 2000.
+
+    material_chunk_size : int, optional
+        Number of materials processed per MSEG query.
+        Default is 2000.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame containing:
+        - material: SAP material number without leading zeros
+        - posting_date: Material document posting date
+        - quantity: Signed movement quantity
+        - movement_type: SAP movement type
+        - plant: SAP plant
+
+        Credit movements (SHKZG = "H") are returned as negative quantities.
+        Debit movements (SHKZG = "S") are returned as positive quantities.
+    """
+
+    total_start = time.perf_counter()
+
+    result_columns = [
+        "material",
+        "posting_date",
+        "quantity",
+        "movement_type",
+        "plant",
+    ]
+
+    materials = list(dict.fromkeys(
+        str(material).strip().lstrip("0")
+        for material in materials_list
+    ))
+
+    materials_sap = [
+        material.zfill(18)
+        for material in materials
+    ]
+
+    plants = list(dict.fromkeys(
+        str(plant).strip()
+        for plant in plants
+    ))
+
+    movement_types = list(dict.fromkeys(
+        str(movement_type).strip().zfill(3)
+        for movement_type in movement_types
+    ))
+
+    if not materials or not plants or not movement_types:
+        return pd.DataFrame(columns=result_columns)
+
+    date_from = pd.to_datetime(
+        date_from,
+        format="%Y%m%d"
+    ).strftime("%Y%m%d")
+
+    date_to = pd.to_datetime(
+        date_to,
+        format="%Y%m%d"
+    ).strftime("%Y%m%d")
+
+    if date_from > date_to:
+        raise ValueError("date_from cannot be later than date_to.")
+
+    plants_sql = "', '".join(plants)
+    movements_sql = "', '".join(movement_types)
+
+    mseg_rows = []
+
+    with get_conn(sap_system) as conn:
+
+        # ----------------------------------------------------------
+        # MKPF
+        # ----------------------------------------------------------
+        mkpf_start = time.perf_counter()
+
+        mkpf_rows = rfc_read_table(
+            conn=conn,
+            table="MKPF",
+            fields=[
+                "MBLNR",
+                "MJAHR",
+                "BUDAT",
+            ],
+            where=f"""
+                BUDAT >= '{date_from}'
+                AND BUDAT <= '{date_to}'
+            """
+        )
+
+        print(
+            f"MKPF: {len(mkpf_rows):,} rows | "
+            f"{time.perf_counter() - mkpf_start:.2f}s"
+        )
+
+        if not mkpf_rows:
+            return pd.DataFrame(columns=result_columns)
+
+        df_mkpf = pd.DataFrame(mkpf_rows)
+
+        df_mkpf = (
+            df_mkpf[
+                ["MBLNR", "MJAHR", "BUDAT"]
+            ]
+            .drop_duplicates(
+                subset=["MBLNR", "MJAHR"]
+            )
+        )
+
+        # ----------------------------------------------------------
+        # MSEG
+        # ----------------------------------------------------------
+        mseg_start = time.perf_counter()
+        rfc_calls = 0
+
+        # Process each year separately because MBLNR is uniquely
+        # identified together with MJAHR.
+        for document_year, year_group in df_mkpf.groupby("MJAHR"):
+
+            document_numbers = (
+                year_group["MBLNR"]
+                .dropna()
+                .astype(str)
+                .unique()
+                .tolist()
+            )
+
+            for documents_batch in chunks(
+                document_numbers,
+                size=document_chunk_size,
+            ):
+
+                documents_sql = "', '".join(documents_batch)
+
+                for materials_batch in chunks(
+                    materials_sap,
+                    size=material_chunk_size,
+                ):
+
+                    materials_sql = "', '".join(materials_batch)
+
+                    rows = rfc_read_table(
+                        conn=conn,
+                        table="MSEG",
+                        fields=[
+                            "MBLNR",
+                            "MJAHR",
+                            "ZEILE",
+                            "MATNR",
+                            "WERKS",
+                            "BWART",
+                            "MENGE",
+                            "SHKZG",
+                        ],
+                        where=f"""
+                            MJAHR = '{document_year}'
+                            AND MBLNR IN ('{documents_sql}')
+                            AND MATNR IN ('{materials_sql}')
+                            AND WERKS IN ('{plants_sql}')
+                            AND BWART IN ('{movements_sql}')
+                        """
+                    )
+
+                    mseg_rows.extend(rows)
+                    rfc_calls += 1
+
+        print(
+            f"MSEG: {len(mseg_rows):,} rows | "
+            f"{rfc_calls:,} RFC calls | "
+            f"{time.perf_counter() - mseg_start:.2f}s"
+        )
+
+    if not mseg_rows:
+        print(
+            f"Total execution time: "
+            f"{time.perf_counter() - total_start:.2f}s"
+        )
+        return pd.DataFrame(columns=result_columns)
+
+    # --------------------------------------------------------------
+    # Prepare MSEG
+    # --------------------------------------------------------------
+    df_mseg = pd.DataFrame(mseg_rows)
+
+    df_mseg = df_mseg.drop_duplicates(
+        subset=[
+            "MBLNR",
+            "MJAHR",
+            "ZEILE",
+        ]
+    ).copy()
+
+    df_mseg["MATNR"] = (
+        df_mseg["MATNR"]
+        .astype(str)
+        .str.lstrip("0")
+    )
+
+    df_mseg["MENGE"] = pd.to_numeric(
+        df_mseg["MENGE"],
+        errors="coerce",
+    )
+
+    # Apply quantity sign
+    df_mseg["quantity"] = df_mseg["MENGE"]
+
+    df_mseg.loc[
+        df_mseg["SHKZG"] == "H",
+        "quantity"
+    ] *= -1
+
+    # --------------------------------------------------------------
+    # Add posting date
+    # --------------------------------------------------------------
+    df = df_mseg.merge(
+        df_mkpf,
+        on=["MBLNR", "MJAHR"],
+        how="inner",
+        validate="many_to_one",
+    )
+
+    df["BUDAT"] = pd.to_datetime(
+        df["BUDAT"],
+        format="%Y%m%d",
+        errors="coerce",
+    )
+
+    df = df.rename(
+        columns={
+            "MATNR": "material",
+            "BUDAT": "posting_date",
+            "BWART": "movement_type",
+            "WERKS": "plant",
+        }
+    )
+
+    df = (
+        df[result_columns]
+        .dropna(subset=["posting_date", "quantity"])
+        .sort_values(
+            ["posting_date", "material", "plant"]
+        )
+        .reset_index(drop=True)
+    )
+
+    print(
+        f"TOTAL: {len(df):,} rows | "
+        f"{time.perf_counter() - total_start:.2f}s"
+    )
+
+    return df
