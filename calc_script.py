@@ -198,7 +198,7 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     stats_df.sort_values(by='daily_avg_consumption', ascending=False, inplace=True)
     stats_df.reset_index(drop=True, inplace=True)
 
-    lead_times = zsbe_df[['material', 'plant', 'planned_delivery_time', 'total_replenishment_time']].drop_duplicates()
+    lead_times = zsbe_df[['material', 'plant']].drop_duplicates()
 
     # Stock items are produced within 3 days
     lead_times['total_replenishment_time'] = 3
