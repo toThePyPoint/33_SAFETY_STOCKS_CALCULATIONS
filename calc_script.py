@@ -528,7 +528,7 @@ def create_all_product_groups_plant_summary(plant_summaries):
     return all_product_groups_plant_summary[plant_summaries[-1].columns]
 
 
-def create_new_safety_stocks_df(stats_by_product_group, changes_from_date):
+def create_new_safety_stocks_df(stats_by_product_group, changes_from_date, sap_system):
     columns = [
         'product_group',
         'plant',
@@ -568,7 +568,7 @@ def create_new_safety_stocks_df(stats_by_product_group, changes_from_date):
 
     ss_changes_df = get_ss_changes_records(materials_list=unique_mat_nums,
                                            stocks_deleted_flag=True,
-                                           sap_system="P11_SSO",
+                                           sap_system=sap_system,
                                            date_from=changes_from_date)
 
     # ss_changes_df = ss_changes_df[['MATNR', 'WERKS', 'UDATE']].rename(columns={'MATNR': 'material', 'WERKS': 'plant', 'UDATE': 'ss_last_deletion'})
@@ -579,7 +579,7 @@ def create_new_safety_stocks_df(stats_by_product_group, changes_from_date):
     return new_safety_stocks_df
 
 
-def create_safety_stocks_to_be_deleted_df(stats_by_product_group, changes_from_date):
+def create_safety_stocks_to_be_deleted_df(stats_by_product_group, changes_from_date, sap_system):
     columns = [
         'product_group',
         'plant',
@@ -622,7 +622,7 @@ def create_safety_stocks_to_be_deleted_df(stats_by_product_group, changes_from_d
 
     ss_changes_df = get_ss_changes_records(materials_list=unique_mat_nums,
                                            stocks_deleted_flag=False,
-                                           sap_system="P11_SSO",
+                                           sap_system=sap_system,
                                            date_from=changes_from_date)
 
     safety_stocks_to_be_deleted = safety_stocks_to_be_deleted.merge(ss_changes_df, on=['material', 'plant'], how='left')
@@ -660,7 +660,8 @@ def create_many_product_groups_report(
         fast_movers_lt = 0,
         trend_coefficients = None,
         streak_length = 20,
-        changes_from_date = '20250101'
+        changes_from_date = '20250101',
+        sap_system = "K11"
 ):
     all_files = get_input_files(input_directory, product_groups)
     product_summary_rows = []
@@ -747,8 +748,9 @@ def create_many_product_groups_report(
 
     all_products_summary = create_all_products_summary(product_summary_rows)
     all_product_groups_plant_summary = create_all_product_groups_plant_summary(plant_summaries)
-    new_safety_stocks_df = create_new_safety_stocks_df(stats_by_product_group, changes_from_date)
-    safety_stocks_to_be_deleted_df = create_safety_stocks_to_be_deleted_df(stats_by_product_group, changes_from_date)
+    new_safety_stocks_df = create_new_safety_stocks_df(stats_by_product_group, changes_from_date, sap_system)
+    safety_stocks_to_be_deleted_df = create_safety_stocks_to_be_deleted_df(stats_by_product_group, changes_from_date,
+                                                                           sap_system)
 
     if output_directory and new_safety_stocks_file_name:
         new_safety_stocks_file_path = Path(output_directory) / new_safety_stocks_file_name
