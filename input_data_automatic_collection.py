@@ -11,7 +11,7 @@ def chunks(values, size=3000):
 
 def get_materials_by_mrp_controller(
     plant,
-    mrp_controller,
+    mrp_controllers,
     sap_system="K11",
 ):
     result_columns = [
@@ -20,6 +20,8 @@ def get_materials_by_mrp_controller(
         "DISPO",
     ]
 
+    mrp_sql = "', '".join(mrp_controllers)
+
     with get_conn(sap_system) as conn:
         rows = rfc_read_table(
             conn=conn,
@@ -27,7 +29,7 @@ def get_materials_by_mrp_controller(
             fields=result_columns,
             where=f"""
                 WERKS = '{plant}'
-                AND DISPO = '{mrp_controller}'
+                AND DISPO IN ('{mrp_sql}')
             """
         )
 
@@ -522,6 +524,7 @@ def get_material_movements(
         "quantity",
         "movement_type",
         "plant",
+        "customer"
     ]
 
     materials = list(dict.fromkeys(
@@ -649,6 +652,7 @@ def get_material_movements(
                             "BWART",
                             "MENGE",
                             "SHKZG",
+                            "KUNNR",
                         ],
                         where=f"""
                             MJAHR = '{document_year}'
@@ -723,12 +727,20 @@ def get_material_movements(
         errors="coerce",
     )
 
+    df["KUNNR"] = (
+        df["KUNNR"]
+        .replace("", pd.NA)
+        .astype("string")
+        .str.lstrip("0")
+    )
+
     df = df.rename(
         columns={
             "MATNR": "material",
             "BUDAT": "posting_date",
             "BWART": "movement_type",
             "WERKS": "plant",
+            "KUNNR": "customer"
         }
     )
 

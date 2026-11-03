@@ -38,33 +38,33 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
 
     # Mapping for mb51_df (Snake Case)
     mb51_rename = {
-        'Zakład': 'plant',
-        'Materiał': 'material',
-        'Opis materiału': 'material_description',
-        'Data księgowania': 'posting_date',
-        'Ilość': 'quantity',
-        'Podst. jedn. miary': 'base_uom',
-        'Rodzaj ruchu': 'movement_type',
-        'Klient': 'customer_number'
+        # 'Zakład': 'plant',
+        # 'Materiał': 'material',
+        # 'Opis materiału': 'material_description',
+        # 'Data księgowania': 'posting_date',
+        # 'Ilość': 'quantity',
+        # 'Podst. jedn. miary': 'base_uom',
+        # 'Rodzaj ruchu': 'movement_type',
+        'customer': 'customer_number'
     }
-
-    # Mapping for zsbe_df (Snake Case + Unit Price)
+    #
+    # # Mapping for zsbe_df (Snake Case + Unit Price)
     zsbe_rename = {
-        'Materiał': 'material',
-        'Opis materiału': 'material_description',
-        'Rodzaj materiału': 'material_type',
-        'Zakład': 'plant',
-        'Planow. czas dostawy': 'planned_delivery_time',
-        'Całk. czas uzupełn.': 'total_replenishment_time',
-        'Unnamed: 6': 'unit_price',  # Fix according to your information
-        'Waluta': 'currency',
-        'Jednostka ceny': 'price_unit',
-        'dowolne użycie': 'unrestricted_use',
-        'Podst. jedn. miary': 'base_uom',
-        'pokrycie/M': 'coverage_month',
-        'przec.ilość/MM': 'avg_qty_month',
-        'zapas bezpieczeństwa': 'safety_stock_in_SAP',
-        'Kontroler MRP': 'mrp_controller'
+        # 'Materiał': 'material',
+        # 'Opis materiału': 'material_description',
+        # 'Rodzaj materiału': 'material_type',
+        # 'Zakład': 'plant',
+        # 'Planow. czas dostawy': 'planned_delivery_time',
+        # 'Całk. czas uzupełn.': 'total_replenishment_time',
+        # 'Unnamed: 6': 'unit_price',  # Fix according to your information
+        'price_currency': 'currency',
+        # 'Jednostka ceny': 'price_unit',
+        # 'dowolne użycie': 'unrestricted_use',
+        # 'Podst. jedn. miary': 'base_uom',
+        # 'pokrycie/M': 'coverage_month',
+        # 'przec.ilość/MM': 'avg_qty_month',
+        # 'zapas bezpieczeństwa': 'safety_stock_in_SAP',
+        # 'Kontroler MRP': 'mrp_controller'
     }
 
     if not dc_to_countries:
@@ -74,8 +74,8 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
                            '3701': ['CZ', 'SK'],
                            }
 
-    mb51_df = pd.read_excel(mb51_path, dtype={'Materiał': str, 'Zakład': str, 'Klient': str})
-    zsbe_df = pd.read_excel(zsbe_path, dtype={'Materiał': str, 'Zakład': str})
+    mb51_df = pd.read_excel(mb51_path, dtype={'material': str, 'plant': str, 'customer': str})
+    zsbe_df = pd.read_excel(zsbe_path, dtype={'material': str, 'plant': str})
     no_ss_items_df = pd.read_excel(no_ss_items_path, dtype={'material': str})
     no_ss_customers_df = pd.read_excel(no_ss_customers_path, dtype={'customer_number': str})
     no_ss_customers_list = no_ss_customers_df['customer_number'].to_list()
@@ -284,23 +284,23 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
             zsbe_df['unit_price'] * zsbe_df['currency'].map(ex_rates)
     )
 
-    # Get price AND price unit from zsbe_df
-    price_data = zsbe_df[['material', 'plant', 'unit_price_eur', 'price_unit', 'material_description']].drop_duplicates()
+    # Get price from zsbe_df
+    price_data = zsbe_df[['material', 'plant', 'unit_price_eur', 'material_description']].drop_duplicates()
 
     # Merge with statistics
     stats_df = pd.merge(stats_df, price_data, on=['material', 'plant'], how='left')
 
     # Calculate value
     # 1. Calculate old_ss_value first to include it in the main aggregation
-    stats_df['old_ss_value'] = (stats_df['safety_stock_in_SAP'] * stats_df['unit_price_eur']) / stats_df['price_unit']
+    stats_df['old_ss_value'] = (stats_df['safety_stock_in_SAP'] * stats_df['unit_price_eur']) #/ stats_df['price_unit']
 
     stats_df['new_safety_stock_value'] = (
                                              stats_df['new_safety_stock'] * stats_df['unit_price_eur']
-                                     ) / stats_df['price_unit']
+                                     ) #/ stats_df['price_unit']
 
     stats_df['ROP_value'] = (
                                     stats_df['reorder_point'] * stats_df['unit_price_eur']
-                            ) / stats_df['price_unit']
+                            ) #/ stats_df['price_unit']
 
     # Round to 2 decimal places (monetary value)
     stats_df['new_safety_stock_value'] = stats_df['new_safety_stock_value'].round(2)
