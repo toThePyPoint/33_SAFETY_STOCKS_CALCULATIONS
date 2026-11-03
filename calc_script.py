@@ -10,7 +10,7 @@ from maps import TRANSPORTATION_TIMES
 from ss_changes import get_ss_changes_records
 
 
-def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path, zlso_df, customers_df, prd_plant, get_all_dates, start_date, end_date, start_date_2, end_date_2, k_parameter,
+def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path, zlso_df, customers_df, prd_plant, get_all_dates, start_date, end_date, start_date_2, end_date_2, k_params,
                     ex_rates, std_mad_treshold, min_value_for_new_ss=0, dc_to_countries=None, trend_coefficient=1, zero_streak_length=20, changes_from_date='20250101'):
     '''
 
@@ -25,7 +25,7 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     :param end_date:
     :param start_date_2: date for which we want to calculate average to support decision making (not included in statistics)
     :param end_date_2: date for which we want to calculate average to support decision making (not included in statistics)
-    :param k_parameter:
+    :param k_params:
     :param ex_rates:
     :param std_mad_treshold:
     :param min_value_for_new_ss:
@@ -222,9 +222,29 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
 
     # Now you can merge this with your statistics table
     stats_df = pd.merge(stats_df, lead_times[['material', 'plant', 'lead_time']], on=['material', 'plant'], how='left')
-    stats_df['new_safety_stock'] = (
-            k_parameter * stats_df['volatility_measure'] * np.sqrt(stats_df['lead_time'])
+    # stats_df['new_safety_stock'] = (
+    #         k_parameter * stats_df['volatility_measure'] * np.sqrt(stats_df['lead_time'])
+    # )
+
+    # Set k_param progressively based on average daily consumption
+    stats_df["k_parameter"] = np.select(
+        [
+            stats_df["daily_avg_consumption"] <= k_params["slow"]["max_avg_cons"],
+            stats_df["daily_avg_consumption"] <= k_params["normal"]["max_avg_cons"],
+        ],
+        [
+            k_params["slow"]["k"],
+            k_params["normal"]["k"],
+        ],
+        default=k_params["fast"]["k"]
     )
+
+    stats_df["new_safety_stock"] = (
+            stats_df["k_parameter"]
+            * stats_df["volatility_measure"]
+            * np.sqrt(stats_df["lead_time"])
+    )
+
     stats_df['volatility_method'] = np.where(
         (stats_df['std_mad_ratio'] > std_mad_treshold) &
         (stats_df['safety_stock_in_SAP'].fillna(0) == 0),
@@ -434,7 +454,7 @@ def export_df_to_excel_file(df, file_path):
         'daily_avg_consumption', 'daily_avg_cons_stats_only', 'new_safety_stock', 'new_ss_range', 'reorder_point', 'safety_stock_in_SAP', 'ss_diff',
         'rop_ss_diff', 'volatility_method', 'is_no_ss_item', 'is_below_min_ss', 'calculated_new_ss', 'calculated_new_ROP',
         'Land_LT', 'MinLT', 'is_dc_market_match', 'zero_streak', 'manual_check', "top_customer", "top_customer_name",
-        "top_customer_qty", "top_customer_pct", "n_customers"
+        "top_customer_qty", "top_customer_pct", "n_customers", 'k_parameter'
     ]]
 
     df.to_excel(file_path, index=False)
@@ -644,7 +664,7 @@ def create_many_product_groups_report(
         end_date,
         start_date_2,
         end_date_2,
-        k_parameter,
+        k_params,
         ex_rates,
         std_mad_treshold,
         min_value_for_new_ss=0,
@@ -721,7 +741,7 @@ def create_many_product_groups_report(
             end_date,
             start_date_2,
             end_date_2,
-            k_parameter,
+            k_params,
             ex_rates,
             std_mad_treshold,
             min_value_for_new_ss,

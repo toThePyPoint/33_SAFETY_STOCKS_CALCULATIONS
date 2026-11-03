@@ -20,7 +20,9 @@ def aggregate_ss_summary_files(output_directory, prod_groups):
         if os.path.exists(file_path):
             df = pd.read_excel(file_path, engine="openpyxl", dtype={"plant": str, 'material': str})
 
-            cols_to_skip = ['calculated_new_ss', 'calculated_new_ROP', 'is_dc_market_match', 'is_below_min_ss', 'is_no_ss_item', 'volatility_method']
+            cols_to_skip = ['calculated_new_ss', 'calculated_new_ROP', 'is_dc_market_match', 'is_below_min_ss',
+                            'is_no_ss_item', 'volatility_method', 'daily_avg_cons_stats_only', 'new_safety_stock',
+                            'ss_diff', 'zero_streak']
             cols = [col for col in df.columns if col not in cols_to_skip]
 
             df = df[cols]
