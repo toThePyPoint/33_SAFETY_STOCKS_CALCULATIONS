@@ -137,9 +137,12 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     # Aggregate MB51 to have one total per day/material/plant
     daily_actual = mb51_df.groupby(['material', 'plant', 'posting_date'])['quantity'].sum().reset_index()
 
+    # Keep original consumption
+    daily_actual['quantity_original'] = daily_actual['quantity']
+
     print(f"Multiplying by trend coefficient: {trend_coefficient}")
     # TODO: here multiply by trend_coefficient
-    daily_actual['quantity'] = daily_actual['quantity'] * trend_coefficient
+    daily_actual['quantity_adjusted'] = daily_actual['quantity'] * trend_coefficient
 
     # Merge
     final_df = pd.merge(
@@ -159,14 +162,15 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     ).fillna(0)
 
     # Group by material and plant to calculate statistics
-    stats_df = final_df.groupby(['material', 'plant'])['quantity'].agg(
-        daily_avg_consumption='mean',
-        daily_std_dev='std',
-        daily_mad=lambda x: np.mean(np.abs(x - np.mean(x)))
-    ).reset_index()    
-    
-    stats_df_2 = final_df_2.groupby(['material', 'plant'])['quantity'].agg(
-        daily_avg_cons_stats_only='mean',
+    stats_df = final_df.groupby(['material', 'plant']).agg(
+        daily_avg_consumption_adjusted=('quantity_adjusted', 'mean'),
+        daily_avg_cons_original=('quantity_original', 'mean'),
+        daily_std_dev=('quantity_adjusted', 'std'),
+        daily_mad=('quantity_adjusted', lambda x: np.mean(np.abs(x - np.mean(x))))
+    ).reset_index()
+
+    stats_df_2 = final_df_2.groupby(['material', 'plant']).agg(
+        daily_avg_cons_stats_only=('quantity_original', 'mean')
     ).reset_index()
 
     stats_df = pd.merge(stats_df, stats_df_2, on=['material', 'plant'], how='left')
@@ -189,13 +193,13 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     stats_df['daily_std_dev'] = stats_df['daily_std_dev'].fillna(0)
 
     # Optional: Round results to 2 decimal places for better readability
-    stats_df['daily_avg_consumption'] = stats_df['daily_avg_consumption'].round(4)
+    stats_df['daily_avg_cons_original'] = stats_df['daily_avg_cons_original'].round(4)
+    stats_df['daily_avg_consumption_adjusted'] = stats_df['daily_avg_consumption_adjusted'].round(4)
     stats_df['daily_avg_cons_stats_only'] = stats_df['daily_avg_cons_stats_only'].round(3)
     stats_df['daily_std_dev'] = stats_df['daily_std_dev'].round(4)
 
     # Check the result
-    # print(f"Number of resulting rows: {len(stats_df)}") # Should be 3581
-    stats_df.sort_values(by='daily_avg_consumption', ascending=False, inplace=True)
+    stats_df.sort_values(by='daily_avg_cons_original', ascending=False, inplace=True)
     stats_df.reset_index(drop=True, inplace=True)
 
     lead_times = zsbe_df[['material', 'plant']].drop_duplicates()
@@ -229,8 +233,8 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     # Set k_param progressively based on average daily consumption
     stats_df["k_parameter"] = np.select(
         [
-            stats_df["daily_avg_consumption"] <= k_params["slow"]["max_avg_cons"],
-            stats_df["daily_avg_consumption"] <= k_params["normal"]["max_avg_cons"],
+            stats_df["daily_avg_cons_original"] <= k_params["slow"]["max_avg_cons"],
+            stats_df["daily_avg_cons_original"] <= k_params["normal"]["max_avg_cons"],
         ],
         [
             k_params["slow"]["k"],
@@ -256,7 +260,7 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     stats_df['new_safety_stock'] = np.ceil(stats_df['new_safety_stock']).astype(int)
 
     # Calculate ROP
-    stats_df['reorder_point'] = (stats_df['daily_avg_consumption'] * stats_df['lead_time']
+    stats_df['reorder_point'] = (stats_df["daily_avg_consumption_adjusted"] * stats_df['lead_time']
                                 ) + stats_df['new_safety_stock']
 
     # Round up
@@ -332,7 +336,7 @@ def create_stats_df(mb51_path, zsbe_path, no_ss_items_path, no_ss_customers_path
     stats_df['rop_ss_diff'] = stats_df['reorder_point'] - stats_df['safety_stock_in_SAP']
     
 
-    stats_df['new_ss_range'] = stats_df['new_safety_stock'] / stats_df['daily_avg_consumption']
+    stats_df['new_ss_range'] = stats_df['new_safety_stock'] / stats_df["daily_avg_cons_original"]
     stats_df['new_ss_range'] = stats_df['new_ss_range'].round(2)
 
     # Add ZLSO data
@@ -451,7 +455,7 @@ def create_plant_summary(stats_df):
 def export_df_to_excel_file(df, file_path):
     df = df[[
         'plant', 'material', 'material_description', 'lead_time',
-        'daily_avg_consumption', 'daily_avg_cons_stats_only', 'new_safety_stock', 'new_ss_range', 'reorder_point', 'safety_stock_in_SAP', 'ss_diff',
+        "daily_avg_cons_original", 'daily_avg_cons_stats_only', 'new_safety_stock', 'new_ss_range', 'reorder_point', 'safety_stock_in_SAP', 'ss_diff',
         'rop_ss_diff', 'volatility_method', 'is_no_ss_item', 'is_below_min_ss', 'calculated_new_ss', 'calculated_new_ROP',
         'Land_LT', 'MinLT', 'is_dc_market_match', 'zero_streak', 'manual_check', "top_customer", "top_customer_name",
         "top_customer_qty", "top_customer_pct", "n_customers", 'k_parameter'
@@ -554,7 +558,7 @@ def create_new_safety_stocks_df(stats_by_product_group, changes_from_date, sap_s
         'plant',
         'material',
         'material_description',
-        'daily_avg_consumption',
+        "daily_avg_cons_original",
         'daily_avg_cons_stats_only',
         'reorder_point',
         'new_safety_stock',
@@ -605,7 +609,7 @@ def create_safety_stocks_to_be_deleted_df(stats_by_product_group, changes_from_d
         'plant',
         'material',
         'material_description',
-        'daily_avg_consumption',
+        "daily_avg_cons_original",
         'daily_avg_cons_stats_only',
         'reorder_point',
         'new_safety_stock',

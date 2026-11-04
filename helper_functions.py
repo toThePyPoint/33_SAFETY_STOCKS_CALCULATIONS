@@ -8,7 +8,7 @@ def check_for_zero_streaks(df, streak_length):
 
     Args:
         df (pd.DataFrame): DataFrame containing material, plant,
-            posting_date, and quantity columns.
+            posting_date, and quantity_original columns.
         streak_length (int): Minimum number of consecutive zero-quantity
             records required to identify a streak.
 
@@ -20,7 +20,7 @@ def check_for_zero_streaks(df, streak_length):
     df = df.sort_values(["material", "plant", "posting_date"])
 
     # Flag records with zero consumption
-    df["is_zero"] = df["quantity"].eq(0)
+    df["is_zero"] = df["quantity_original"].eq(0)
 
     # Check whether a streak of consecutive zeros exists
     df["zero_streak"] = (
