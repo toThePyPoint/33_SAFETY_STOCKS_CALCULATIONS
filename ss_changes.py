@@ -20,6 +20,7 @@ def get_ss_changes_records(
         result_columns = [
             "material",
             "plant",
+            "USERNAME",
             change_date_col_name,
         ]
     else:
@@ -27,6 +28,7 @@ def get_ss_changes_records(
         result_columns = [
             "material",
             "plant",
+            "USERNAME",
             change_date_col_name,
         ]
 

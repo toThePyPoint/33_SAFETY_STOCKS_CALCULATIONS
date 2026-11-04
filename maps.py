@@ -13,8 +13,8 @@ DEFAULT_CHART_STYLE = {
 
 # plant: number of days
 TRANSPORTATION_TIMES = {
-    '0301': 2,
-    '1201': 3,
-    '3701': 3,
-    '2101': 0
+    '0301': 3,
+    '1201': 4,
+    '3701': 4,
+    '2101': 1
 }
