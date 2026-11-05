@@ -456,7 +456,7 @@ def export_df_to_excel_file(df, file_path):
     df = df[[
         'plant', 'material', 'material_description', 'lead_time',
         "daily_avg_cons_original", 'daily_avg_cons_stats_only', 'new_safety_stock', 'new_ss_range', 'reorder_point', 'safety_stock_in_SAP', 'ss_diff',
-        'rop_ss_diff', 'volatility_method', 'volatility_measure', 'is_no_ss_item', 'is_below_min_ss', 'calculated_new_ss', 'calculated_new_ROP',
+        'rop_ss_diff', 'old_ss_value', 'ROP_value', 'volatility_method', 'volatility_measure', 'is_no_ss_item', 'is_below_min_ss', 'calculated_new_ss', 'calculated_new_ROP',
         'Land_LT', 'MinLT', 'is_dc_market_match', 'zero_streak', 'manual_check', "top_customer", "top_customer_name",
         "top_customer_qty", "top_customer_pct", "n_customers", 'k_parameter'
     ]]
